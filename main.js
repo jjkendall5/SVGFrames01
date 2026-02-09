@@ -21,6 +21,7 @@ const state = {
     tool: 'pen',
     strokeSize: 2,
     strokeColor: '#000000',
+    backgroundColor: '#ffffff', // Global background color
     onionSkinEnabled: true,
     isPlaying: false,
     playInterval: null,
@@ -32,7 +33,10 @@ const state = {
 // ==================== INITIALIZATION ====================
 function init() {
     setupEventListeners();
+    setupKeyboardShortcuts();
     loadFromLocalStorage();
+    syncBackgroundUI(); // Sync UI with loaded state
+    updateBackground(); // Set initial background
     renderFrame();
     updateLayerList();
     updateFrameList();
@@ -41,11 +45,15 @@ function init() {
 
 // ==================== EVENT LISTENERS ====================
 function setupEventListeners() {
-    // SVG drawing events
-    svg.addEventListener('mousedown', startDrawing);
-    svg.addEventListener('mousemove', draw);
-    svg.addEventListener('mouseup', stopDrawing);
-    svg.addEventListener('mouseleave', stopDrawing);
+    // SVG drawing events - Use Pointer Events for mouse, touch, and pen support
+    svg.addEventListener('pointerdown', startDrawing);
+    svg.addEventListener('pointermove', draw);
+    svg.addEventListener('pointerup', stopDrawing);
+    svg.addEventListener('pointercancel', stopDrawing); // Handle when pointer is cancelled
+    svg.addEventListener('pointerleave', stopDrawing);
+    
+    // Prevent context menu on long press (mobile)
+    svg.addEventListener('contextmenu', (e) => e.preventDefault());
 
     // Tool selection
     document.getElementById('penTool').addEventListener('click', () => selectTool('pen'));
@@ -76,6 +84,27 @@ function setupEventListeners() {
         onionToggle.classList.add('active');
     }
 
+    // Background color picker
+    document.getElementById('backgroundColorPicker').addEventListener('change', (e) => {
+        state.backgroundColor = e.target.value;
+        updateBackground();
+        saveToLocalStorage();
+    });
+
+    // Transparent background toggle
+    document.getElementById('transparentBgToggle').addEventListener('change', (e) => {
+        const colorPicker = document.getElementById('backgroundColorPicker');
+        if (e.target.checked) {
+            state.backgroundColor = 'transparent';
+            colorPicker.disabled = true;
+        } else {
+            state.backgroundColor = colorPicker.value;
+            colorPicker.disabled = false;
+        }
+        updateBackground();
+        saveToLocalStorage();
+    });
+
     // Layer controls
     document.getElementById('addLayerBtn').addEventListener('click', addLayer);
     document.getElementById('deleteLayerBtn').addEventListener('click', deleteLayer);
@@ -104,7 +133,7 @@ function setupEventListeners() {
     document.getElementById('redoBtn').addEventListener('click', redo);
 
     // Export/Import
-    document.getElementById('exportGifBtn').addEventListener('click', exportAsSVGSequence);
+    document.getElementById('exportGifBtn').addEventListener('click', exportAsGIF);
     document.getElementById('exportJsonBtn').addEventListener('click', exportProject);
     document.getElementById('importJsonBtn').addEventListener('click', () => {
         document.getElementById('fileInput').click();
@@ -113,6 +142,44 @@ function setupEventListeners() {
 
     // Auto-save every 10 seconds
     setInterval(saveToLocalStorage, 10000);
+}
+
+// ==================== KEYBOARD SHORTCUTS ====================
+function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', handleKeyboardShortcut);
+}
+
+function handleKeyboardShortcut(e) {
+    // Don't trigger shortcuts when typing in input fields
+    const activeElement = document.activeElement;
+    if (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA') {
+        return;
+    }
+    
+    // Detect platform: macOS uses Cmd, Windows/Linux use Ctrl
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const modifier = isMac ? e.metaKey : e.ctrlKey;
+    
+    // Undo: Cmd/Ctrl + Z (without Shift)
+    if (modifier && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault(); // Prevent browser undo
+        undo();
+        return;
+    }
+    
+    // Redo: Cmd/Ctrl + Shift + Z OR Ctrl + Y (Windows convention)
+    if (modifier && e.shiftKey && e.key === 'z') {
+        e.preventDefault();
+        redo();
+        return;
+    }
+    
+    // Redo alternative: Ctrl + Y (Windows/Linux only)
+    if (!isMac && e.ctrlKey && e.key === 'y') {
+        e.preventDefault();
+        redo();
+        return;
+    }
 }
 
 // ==================== LAYER MANAGEMENT ====================
@@ -214,6 +281,9 @@ function updateMaxFrames() {
 
 // ==================== DRAWING FUNCTIONS ====================
 function startDrawing(e) {
+    // Prevent default touch behaviors (scrolling, zooming, etc.)
+    e.preventDefault();
+    
     if (state.isPlaying) return;
     
     const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
@@ -241,7 +311,12 @@ function startDrawing(e) {
     state.currentPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     state.currentPath.setAttribute('fill', 'none');
     state.currentPath.setAttribute('stroke', state.strokeColor);
-    state.currentPath.setAttribute('stroke-width', state.strokeSize);
+    
+    // Support pressure-sensitive input (Apple Pencil, etc.)
+    const pressure = e.pressure || 0.5; // Default to 0.5 if no pressure data
+    const strokeWidth = state.strokeSize * (0.5 + pressure); // Scale by pressure
+    
+    state.currentPath.setAttribute('stroke-width', strokeWidth);
     state.currentPath.setAttribute('stroke-linecap', 'round');
     state.currentPath.setAttribute('stroke-linejoin', 'round');
     
@@ -258,6 +333,9 @@ function startDrawing(e) {
 }
 
 function draw(e) {
+    // Prevent default touch behaviors
+    e.preventDefault();
+    
     if (!state.isDrawing || !state.currentPath) return;
     
     const point = getSvgPoint(e);
@@ -268,7 +346,12 @@ function draw(e) {
     state.currentPath.setAttribute('d', pathData);
 }
 
-function stopDrawing() {
+function stopDrawing(e) {
+    // Prevent default if event exists
+    if (e) {
+        e.preventDefault();
+    }
+    
     if (!state.isDrawing) return;
     
     state.isDrawing = false;
@@ -301,6 +384,9 @@ function stopDrawing() {
 
 function getSvgPoint(e) {
     const rect = svg.getBoundingClientRect();
+    
+    // Use clientX/clientY which works for mouse, touch, and pointer events
+    // Pointer Events API normalizes coordinates across all input types
     return {
         x: e.clientX - rect.left,
         y: e.clientY - rect.top
@@ -335,6 +421,31 @@ function pointsToPath(points) {
 }
 
 // ==================== RENDERING ====================
+function syncBackgroundUI() {
+    const colorPicker = document.getElementById('backgroundColorPicker');
+    const transparentToggle = document.getElementById('transparentBgToggle');
+    
+    if (state.backgroundColor === 'transparent') {
+        transparentToggle.checked = true;
+        colorPicker.disabled = true;
+    } else {
+        transparentToggle.checked = false;
+        colorPicker.disabled = false;
+        colorPicker.value = state.backgroundColor;
+    }
+}
+
+function updateBackground() {
+    const bgRect = document.getElementById('backgroundRect');
+    if (bgRect) {
+        if (state.backgroundColor === 'transparent') {
+            bgRect.setAttribute('fill', 'none');
+        } else {
+            bgRect.setAttribute('fill', state.backgroundColor);
+        }
+    }
+}
+
 function renderFrame() {
     console.log('Rendering frame:', state.currentFrameIndex);
     
@@ -561,8 +672,9 @@ function togglePlayback() {
 function startPlayback() {
     state.isPlaying = true;
     const playBtn = document.getElementById('playBtn');
-    playBtn.querySelector('.btn-icon').textContent = '⏸';
-    playBtn.querySelector('.btn-label').textContent = 'Pause';
+    playBtn.querySelector('.icon').textContent = '⏸';
+    playBtn.querySelector('.label').textContent = 'Pause';
+    playBtn.title = 'Pause';
     
     const frameDelay = 1000 / state.fps;
     
@@ -579,8 +691,9 @@ function startPlayback() {
 function stopPlayback() {
     state.isPlaying = false;
     const playBtn = document.getElementById('playBtn');
-    playBtn.querySelector('.btn-icon').textContent = '▶';
-    playBtn.querySelector('.btn-label').textContent = 'Play';
+    playBtn.querySelector('.icon').textContent = '▶';
+    playBtn.querySelector('.label').textContent = 'Play';
+    playBtn.title = 'Play';
     
     if (state.playInterval) {
         clearInterval(state.playInterval);
@@ -664,7 +777,8 @@ function saveToLocalStorage() {
             maxFrames: state.maxFrames,
             layerIdCounter: state.layerIdCounter,
             fps: state.fps,
-            version: '4.0' // New version with layer-centric model
+            backgroundColor: state.backgroundColor,
+            version: '4.1' // Updated version with background color
         };
         localStorage.setItem('vectorAnimationToolData', JSON.stringify(saveData));
     } catch (e) {
@@ -678,14 +792,15 @@ function loadFromLocalStorage() {
         if (savedData) {
             const data = JSON.parse(savedData);
             
-            // Check if data has new layer-centric structure
-            if (data.version === '4.0' && data.layers && data.layers[0] && data.layers[0].frames) {
+            // Check if data has layer-centric structure
+            if ((data.version === '4.0' || data.version === '4.1') && data.layers && data.layers[0] && data.layers[0].frames) {
                 state.layers = data.layers;
                 state.currentLayerId = data.currentLayerId || state.layers[0].id;
                 state.currentFrameIndex = data.currentFrameIndex || 0;
                 state.maxFrames = data.maxFrames || 1;
                 state.layerIdCounter = data.layerIdCounter || 1;
                 state.fps = data.fps || 12;
+                state.backgroundColor = data.backgroundColor || '#ffffff';
             } else {
                 // Old format - reset
                 console.log('Old data format detected, resetting...');
@@ -693,6 +808,7 @@ function loadFromLocalStorage() {
             }
             
             document.getElementById('fpsInput').value = state.fps;
+            // Background UI will be synced in init() via syncBackgroundUI()
         }
     } catch (e) {
         console.error('Failed to load from localStorage:', e);
@@ -719,7 +835,8 @@ function exportProject() {
     const projectData = {
         layers: state.layers,
         fps: state.fps,
-        version: '4.0',
+        backgroundColor: state.backgroundColor,
+        version: '4.1',
         format: 'vector-svg-layer-timelines'
     };
     
@@ -744,9 +861,10 @@ function importProject(e) {
         try {
             const projectData = JSON.parse(event.target.result);
             
-            if (projectData.version === '4.0' && projectData.layers) {
+            if ((projectData.version === '4.0' || projectData.version === '4.1') && projectData.layers) {
                 state.layers = projectData.layers;
                 state.fps = projectData.fps || 12;
+                state.backgroundColor = projectData.backgroundColor || '#ffffff';
                 state.currentFrameIndex = 0;
                 state.currentLayerId = state.layers[0].id;
                 updateMaxFrames();
@@ -756,7 +874,9 @@ function importProject(e) {
             }
             
             document.getElementById('fpsInput').value = state.fps;
+            syncBackgroundUI();
             
+            updateBackground();
             renderFrame();
             updateLayerList();
             updateFrameList();
@@ -773,6 +893,151 @@ function importProject(e) {
     e.target.value = '';
 }
 
+// ==================== GIF EXPORT ====================
+async function exportAsGIF() {
+    // Check if gifshot is available
+    if (typeof gifshot === 'undefined') {
+        alert('GIF library not loaded. Please refresh the page and try again.');
+        return;
+    }
+    
+    // Disable export button
+    const exportBtn = document.getElementById('exportGifBtn');
+    const originalText = exportBtn.textContent;
+    exportBtn.disabled = true;
+    exportBtn.textContent = 'Exporting…';
+    
+    // Show loading indicator
+    const loading = document.createElement('div');
+    loading.className = 'loading';
+    loading.textContent = 'Rendering frames...';
+    document.body.appendChild(loading);
+    
+    try {
+        console.log(`Starting GIF export: ${state.maxFrames} frames at ${state.fps} FPS`);
+        
+        // Create temporary canvas for rendering
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = 800;
+        tempCanvas.height = 600;
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        const images = [];
+        
+        // Render each frame to base64 image
+        for (let i = 0; i < state.maxFrames; i++) {
+            loading.textContent = `Rendering frame ${i + 1}/${state.maxFrames}...`;
+            console.log(`Rendering frame ${i + 1}/${state.maxFrames}`);
+            
+            // Allow UI to update
+            await new Promise(resolve => setTimeout(resolve, 10));
+            
+            // Clear canvas
+            tempCtx.clearRect(0, 0, 800, 600);
+            
+            // Draw background
+            if (state.backgroundColor !== 'transparent') {
+                tempCtx.fillStyle = state.backgroundColor;
+                tempCtx.fillRect(0, 0, 800, 600);
+            }
+            
+            // Render all visible layers at this frame index
+            await renderFrameToCanvas(tempCtx, i);
+            
+            // Convert canvas to base64 image
+            images.push(tempCanvas.toDataURL('image/png'));
+        }
+        
+        console.log('All frames rendered, starting GIF encoding...');
+        loading.textContent = 'Encoding GIF...';
+        
+        // Create GIF using gifshot
+        gifshot.createGIF({
+            images: images,
+            gifWidth: 800,
+            gifHeight: 600,
+            interval: 1 / state.fps, // Interval in seconds
+            numFrames: state.maxFrames,
+            frameDuration: 1, // Frame duration multiplier
+            sampleInterval: 10, // Quality setting (lower = better quality)
+        }, function(obj) {
+            if (!obj.error) {
+                console.log('GIF encoding complete');
+                loading.textContent = 'Download starting...';
+                
+                // Create download link
+                const link = document.createElement('a');
+                link.href = obj.image; // base64 data URL
+                link.download = `animation-${Date.now()}.gif`;
+                
+                // Trigger download
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                // Cleanup
+                setTimeout(() => {
+                    if (document.body.contains(loading)) {
+                        document.body.removeChild(loading);
+                    }
+                    exportBtn.disabled = false;
+                    exportBtn.textContent = originalText;
+                }, 100);
+            } else {
+                console.error('GIF encoding error:', obj.error);
+                alert('Failed to encode GIF: ' + obj.error);
+                if (document.body.contains(loading)) {
+                    document.body.removeChild(loading);
+                }
+                exportBtn.disabled = false;
+                exportBtn.textContent = originalText;
+            }
+        });
+        
+    } catch (err) {
+        console.error('GIF export error:', err);
+        alert('Failed to export GIF: ' + err.message);
+        if (document.body.contains(loading)) {
+            document.body.removeChild(loading);
+        }
+        exportBtn.disabled = false;
+        exportBtn.textContent = originalText;
+    }
+}
+
+// Render a specific frame index to a canvas context
+async function renderFrameToCanvas(ctx, frameIndex) {
+    // Iterate through layers in order
+    for (const layer of state.layers) {
+        if (!layer.visible || !layer.frames[frameIndex]) {
+            continue;
+        }
+        
+        // Render each path in the frame
+        for (const pathData of layer.frames[frameIndex].paths) {
+            ctx.strokeStyle = pathData.stroke;
+            ctx.lineWidth = parseFloat(pathData.strokeWidth);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            
+            // Handle eraser tool (draws white, but we need to use composite operation)
+            if (pathData.tool === 'eraser') {
+                ctx.globalCompositeOperation = 'destination-out';
+            } else {
+                ctx.globalCompositeOperation = 'source-over';
+            }
+            
+            // Draw the path
+            const path2D = new Path2D(pathData.d);
+            ctx.stroke(path2D);
+        }
+    }
+    
+    // Reset composite operation
+    ctx.globalCompositeOperation = 'source-over';
+}
+
+// Legacy SVG export (keep for backup/alternative export)
 function exportAsSVGSequence() {
     const loading = document.createElement('div');
     loading.className = 'loading';
@@ -806,10 +1071,15 @@ function exportAsSVGSequence() {
     }, 100);
 }
 
+
 function createCompositeSVG(frameIndex) {
+    const bgFill = state.backgroundColor === 'transparent' ? 'none' : state.backgroundColor;
+    
+    console.log('Exporting frame', frameIndex, 'with background:', bgFill);
+    
     let svgContent = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg width="800" height="600" xmlns="http://www.w3.org/2000/svg" version="1.1">
-    <rect width="100%" height="100%" fill="white"/>
+    <rect id="background" width="100%" height="100%" fill="${bgFill}"/>
 `;
     
     // Composite all layers at this frame index
@@ -825,6 +1095,9 @@ function createCompositeSVG(frameIndex) {
     });
     
     svgContent += `</svg>`;
+    
+    console.log('Generated SVG preview:', svgContent.substring(0, 300));
+    
     return svgContent;
 }
 

@@ -3,58 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vector Animation</title>
+    <title>SVG Frame</title>
     <link rel="stylesheet" href="styles.css">
+    <!-- gifshot library for reliable client-side GIF encoding without workers -->
+    <script src="https://cdn.jsdelivr.net/npm/gifshot@0.4.5/dist/gifshot.min.js"></script>
 </head>
 <body>
-    <!-- Top Bar -->
-    <div class="top-bar">
-        <div class="control-group">
-            <button id="undoBtn" class="icon-btn" title="Undo (Ctrl+Z)">
-                <span class="btn-icon">↶</span>
-                <span class="btn-label">Undo</span>
-            </button>
-            <button id="redoBtn" class="icon-btn" title="Redo (Ctrl+Y)">
-                <span class="btn-icon">↷</span>
-                <span class="btn-label">Redo</span>
-            </button>
+    <!-- Minimal Top Header -->
+    <header class="app-header">
+        <div class="header-left">
+            <span class="app-name">SVG Frame</span>
         </div>
-        
-        <div class="control-group playback">
-            <button id="playBtn" class="icon-btn play" title="Play/Pause">
-                <span class="btn-icon">▶</span>
-                <span class="btn-label">Play</span>
+        <div class="header-right">
+            <button id="undoBtn" class="header-btn" title="Undo (Ctrl+Z)">
+                <span class="icon">↶</span>
+                <span class="label">Undo</span>
             </button>
-            <button id="stopBtn" class="icon-btn" title="Stop">
-                <span class="btn-icon">⏹</span>
-                <span class="btn-label">Stop</span>
+            <button id="redoBtn" class="header-btn" title="Redo (Ctrl+Y)">
+                <span class="icon">↷</span>
+                <span class="label">Redo</span>
             </button>
-            <div class="fps-control">
-                <label>FPS</label>
-                <input type="number" id="fpsInput" value="12" min="1" max="60">
-            </div>
-        </div>
-
-        <div class="control-group">
-            <button id="exportGifBtn" class="text-btn">Export SVG</button>
-            <button id="exportJsonBtn" class="text-btn">Save Project</button>
-            <button id="importJsonBtn" class="text-btn">Open Project</button>
+            <div class="header-divider"></div>
+            <button id="exportGifBtn" class="header-btn">Export GIF</button>
+            <button id="exportJsonBtn" class="header-btn">Save</button>
+            <button id="importJsonBtn" class="header-btn">Open</button>
             <input type="file" id="fileInput" accept=".json" style="display: none;">
         </div>
-    </div>
+    </header>
 
     <!-- Main Workspace -->
     <div class="workspace">
-        <!-- Left Toolbar -->
-        <div class="toolbar">
-            <div class="tool-group">
-                <button id="penTool" class="tool-btn active" title="Pen (P)" data-tool="pen">
+        <!-- Left: Drawing Tools Only -->
+        <aside class="tool-column">
+            <div class="tool-section">
+                <button id="penTool" class="tool-btn active" title="Pen (P)">
                     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 17l4-4m0 0l10-10 4 4-10 10m-4-4l-4 4"/>
                     </svg>
                     <span class="tool-label">Pen</span>
                 </button>
-                <button id="eraserTool" class="tool-btn" title="Eraser (E)" data-tool="eraser">
+                <button id="eraserTool" class="tool-btn" title="Eraser (E)">
                     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="4" y="8" width="12" height="8" rx="1"/>
                         <path d="M7 8l6-6"/>
@@ -63,96 +51,142 @@
                 </button>
             </div>
 
-            <div class="divider"></div>
+            <div class="tool-divider"></div>
 
-            <div class="tool-group sizes">
-                <span class="group-label">Size</span>
-                <button class="size-btn active" data-size="2" title="Small (1)">
-                    <div class="size-preview" style="width: 2px; height: 2px;"></div>
+            <div class="tool-section">
+                <span class="section-label">Size</span>
+                <button class="size-btn active" data-size="2" title="Small">
+                    <div class="size-dot" style="width: 2px; height: 2px;"></div>
                     <span class="size-label">S</span>
                 </button>
-                <button class="size-btn" data-size="5" title="Medium (2)">
-                    <div class="size-preview" style="width: 5px; height: 5px;"></div>
+                <button class="size-btn" data-size="5" title="Medium">
+                    <div class="size-dot" style="width: 5px; height: 5px;"></div>
                     <span class="size-label">M</span>
                 </button>
-                <button class="size-btn" data-size="10" title="Large (3)">
-                    <div class="size-preview" style="width: 10px; height: 10px;"></div>
+                <button class="size-btn" data-size="10" title="Large">
+                    <div class="size-dot" style="width: 10px; height: 10px;"></div>
                     <span class="size-label">L</span>
                 </button>
             </div>
 
-            <div class="divider"></div>
+            <div class="tool-divider"></div>
 
-            <div class="tool-group">
-                <span class="group-label">Color</span>
-                <input type="color" id="colorPicker" value="#000000" title="Color">
+            <div class="tool-section">
+                <span class="section-label">Color</span>
+                <input type="color" id="colorPicker" value="#000000" class="color-picker" title="Color">
             </div>
+        </aside>
 
-            <div class="spacer"></div>
-
-            <div class="tool-group">
-                <button id="onionSkinToggle" class="tool-btn" title="Onion Skin (O)">
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="10" cy="10" r="7" opacity="0.3"/>
-                        <circle cx="10" cy="10" r="4"/>
-                    </svg>
-                    <span class="tool-label">Onion</span>
-                </button>
-            </div>
-        </div>
-
-        <!-- Canvas Area -->
-        <div class="canvas-area">
+        <!-- Center: Canvas -->
+        <main class="canvas-zone">
             <svg id="mainSvg" width="800" height="600" xmlns="http://www.w3.org/2000/svg">
-                <rect width="100%" height="100%" fill="white"/>
+                <rect id="backgroundRect" width="100%" height="100%" fill="#ffffff"/>
                 <g id="onionSkinLayer" opacity="0.3"></g>
                 <g id="layersContainer"></g>
             </svg>
-        </div>
+        </main>
+    </div>
 
-        <!-- Floating Panels -->
-        <div class="floating-panel layers-panel">
-            <div class="panel-header">
-                <span class="panel-title">Layers</span>
-                <div class="panel-actions">
-                    <button id="addLayerBtn" class="icon-btn small" title="Add Layer">
-                        <span class="btn-icon">+</span>
-                        <span class="btn-label">Add</span>
-                    </button>
-                    <button id="deleteLayerBtn" class="icon-btn small" title="Delete Layer">
-                        <span class="btn-icon">−</span>
-                        <span class="btn-label">Delete</span>
-                    </button>
+    <!-- Bottom: Timeline Panel (ALL frame/playback/layer controls) -->
+    <section class="timeline-panel">
+        <!-- Timeline Controls Row -->
+        <div class="timeline-controls">
+            <div class="control-group">
+                <button id="playBtn" class="timeline-btn primary" title="Play/Pause">
+                    <span class="icon">▶</span>
+                    <span class="label">Play</span>
+                </button>
+                <button id="stopBtn" class="timeline-btn" title="Stop">
+                    <span class="icon">⏹</span>
+                    <span class="label">Stop</span>
+                </button>
+                <div class="fps-input">
+                    <label>FPS</label>
+                    <input type="number" id="fpsInput" value="12" min="1" max="60">
                 </div>
             </div>
-            <div id="layerList" class="layer-list"></div>
-            <button id="clearFrameBtn" class="clear-btn">Clear Layer</button>
-        </div>
-    </div>
 
-    <!-- Timeline -->
-    <div class="timeline">
-        <div class="timeline-header">
-            <div class="timeline-controls">
-                <button id="addFrameBtn" class="icon-btn small" title="Add Frame">
-                    <span class="btn-icon">+</span>
-                    <span class="btn-label">Add</span>
-                </button>
-                <button id="duplicateFrameBtn" class="icon-btn small" title="Duplicate">
-                    <span class="btn-icon">⧉</span>
-                    <span class="btn-label">Duplicate</span>
-                </button>
-                <button id="deleteFrameBtn" class="icon-btn small" title="Delete">
-                    <span class="btn-icon">×</span>
-                    <span class="btn-label">Delete</span>
+            <div class="control-divider"></div>
+
+            <div class="control-group">
+                <button id="onionSkinToggle" class="timeline-btn" title="Onion Skin (O)">
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="10" cy="10" r="7" opacity="0.3"/>
+                        <circle cx="10" cy="10" r="4"/>
+                    </svg>
+                    <span class="label">Onion</span>
                 </button>
             </div>
-            <span id="frameCounter" class="frame-counter">1 / 1</span>
-        </div>
-        <div class="frame-list" id="frameList"></div>
-    </div>
 
-    <script src="gif.js"></script>
+            <div class="control-divider"></div>
+
+            <div class="control-group bg-controls">
+                <label class="bg-label">Background</label>
+                <input type="color" id="backgroundColorPicker" value="#ffffff" class="bg-color-picker" title="Background Color">
+                <label class="transparent-toggle">
+                    <input type="checkbox" id="transparentBgToggle">
+                    <span>Transparent</span>
+                </label>
+            </div>
+
+            <div class="control-divider"></div>
+
+            <div class="control-group">
+                <button id="addFrameBtn" class="timeline-btn" title="Add Frame">
+                    <span class="icon">+</span>
+                    <span class="label">Add</span>
+                </button>
+                <button id="duplicateFrameBtn" class="timeline-btn" title="Duplicate Frame">
+                    <span class="icon">⧉</span>
+                    <span class="label">Duplicate</span>
+                </button>
+                <button id="deleteFrameBtn" class="timeline-btn" title="Delete Frame">
+                    <span class="icon">×</span>
+                    <span class="label">Delete</span>
+                </button>
+            </div>
+
+            <div class="control-divider"></div>
+
+            <div class="control-group">
+                <span id="frameCounter" class="frame-counter">1 / 1</span>
+            </div>
+        </div>
+
+        <!-- Frame Strip -->
+        <div class="timeline-content">
+            <div class="frames-section">
+                <div class="frames-scroll" id="frameList">
+                    <!-- Frame thumbnails inserted here -->
+                </div>
+            </div>
+
+            <!-- Layers Section (part of timeline zone) -->
+            <div class="layers-section">
+                <div class="layers-header">
+                    <span class="section-label">Layers</span>
+                    <div class="layer-actions">
+                        <button id="addLayerBtn" class="layer-btn" title="Add Layer">
+                            <span class="icon">+</span>
+                            <span class="label">Add</span>
+                        </button>
+                        <button id="deleteLayerBtn" class="layer-btn" title="Delete Layer">
+                            <span class="icon">−</span>
+                            <span class="label">Delete</span>
+                        </button>
+                        <button id="clearFrameBtn" class="layer-btn" title="Clear Layer">
+                            <span class="icon">×</span>
+                            <span class="label">Clear</span>
+                        </button>
+                    </div>
+                </div>
+                <div id="layerList" class="layer-list">
+                    <!-- Layer items inserted here -->
+                </div>
+            </div>
+        </div>
+    </section>
+
     <script src="main.js"></script>
 </body>
 </html>
