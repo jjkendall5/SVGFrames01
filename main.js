@@ -21,6 +21,7 @@ const state = {
     tool: 'pen',
     strokeSize: 2,
     strokeColor: '#000000',
+    smoothing: 3, // Smoothing amount (0.5 = low, 3 = medium, 8 = high)
     backgroundColor: '#ffffff', // Global background color
     onionSkinEnabled: true,
     isPlaying: false,
@@ -37,6 +38,7 @@ function init() {
     loadFromLocalStorage();
     syncBackgroundUI(); // Sync UI with loaded state
     updateBackground(); // Set initial background
+    updateSmoothingLabel(); // Set initial smoothing label
     renderFrame();
     updateLayerList();
     updateFrameList();
@@ -71,6 +73,12 @@ function setupEventListeners() {
     // Color picker
     document.getElementById('colorPicker').addEventListener('change', (e) => {
         state.strokeColor = e.target.value;
+    });
+    
+    // Smoothing slider
+    document.getElementById('smoothingSlider').addEventListener('input', (e) => {
+        state.smoothing = parseFloat(e.target.value);
+        updateSmoothingLabel();
     });
 
     // Onion skin toggle
@@ -359,11 +367,87 @@ function draw(e) {
     if (!state.isDrawing || !state.currentPath) return;
     
     const point = getSvgPoint(e);
-    state.currentPoints.push(point);
     
-    // Update path with smooth curve
-    const pathData = pointsToPath(state.currentPoints);
-    state.currentPath.setAttribute('d', pathData);
+    // Apply smoothing for pen tool only (not eraser)
+    if (state.tool === 'pen') {
+        // Distance-based point filtering
+        if (state.currentPoints.length > 0) {
+            const lastPoint = state.currentPoints[state.currentPoints.length - 1];
+            const distance = Math.sqrt(
+                Math.pow(point.x - lastPoint.x, 2) + 
+                Math.pow(point.y - lastPoint.y, 2)
+            );
+            
+            // Only add point if it's far enough from the last point
+            // Lower smoothing = smaller minimum distance = more points captured
+            const minDistance = state.smoothing;
+            if (distance < minDistance) {
+                return; // Skip this point
+            }
+        }
+        
+        // Add the point
+        state.currentPoints.push(point);
+        
+        // Apply averaging for additional smoothing
+        const smoothedPoints = applyPointAveraging(state.currentPoints, state.smoothing);
+        
+        // Update path with smoothed curve
+        const pathData = pointsToPath(smoothedPoints);
+        state.currentPath.setAttribute('d', pathData);
+    } else {
+        // Eraser: no smoothing
+        state.currentPoints.push(point);
+        const pathData = pointsToPath(state.currentPoints);
+        state.currentPath.setAttribute('d', pathData);
+    }
+}
+
+// Apply simple moving average to smooth points
+function applyPointAveraging(points, smoothing) {
+    if (points.length < 3 || smoothing < 1) {
+        return points; // Not enough points or no smoothing needed
+    }
+    
+    // Higher smoothing = more averaging
+    // Convert smoothing value to window size (1-3 points)
+    const windowSize = Math.min(3, Math.max(1, Math.floor(smoothing / 3)));
+    
+    if (windowSize < 2) {
+        return points; // No averaging needed
+    }
+    
+    const smoothed = [];
+    
+    // Keep first point as-is
+    smoothed.push(points[0]);
+    
+    // Average middle points
+    for (let i = 1; i < points.length - 1; i++) {
+        let sumX = 0, sumY = 0, count = 0;
+        
+        // Average with neighbors based on window size
+        const start = Math.max(0, i - windowSize);
+        const end = Math.min(points.length - 1, i + windowSize);
+        
+        for (let j = start; j <= end; j++) {
+            sumX += points[j].x;
+            sumY += points[j].y;
+            count++;
+        }
+        
+        smoothed.push({
+            x: sumX / count,
+            y: sumY / count
+        });
+    }
+    
+    // Keep last point as-is for accuracy at stroke end
+    if (points.length > 1) {
+        smoothed.push(points[points.length - 1]);
+    }
+    
+    return smoothed;
 }
 
 function stopDrawing(e) {
@@ -452,6 +536,25 @@ function pointsToPath(points) {
     path += ` L ${lastPoint.x} ${lastPoint.y}`;
     
     return path;
+}
+
+// Update smoothing label based on current value
+function updateSmoothingLabel() {
+    const label = document.getElementById('smoothingLabel');
+    if (!label) return;
+    
+    const value = state.smoothing;
+    let text = 'Medium';
+    
+    if (value <= 1) {
+        text = 'Low';
+    } else if (value <= 4) {
+        text = 'Medium';
+    } else {
+        text = 'High';
+    }
+    
+    label.textContent = text;
 }
 
 // ==================== RENDERING ====================

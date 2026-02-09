@@ -62,6 +62,7 @@ body {
 /* ==================== HEADER - Minimal ==================== */
 .app-header {
     height: var(--header-height);
+    min-height: var(--header-height);
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border);
     display: flex;
@@ -69,11 +70,14 @@ body {
     justify-content: space-between;
     padding: 0 var(--space-4);
     flex-shrink: 0;
+    gap: var(--space-2);
+    overflow: hidden; /* Prevent content from overflowing */
 }
 
 .header-left {
     display: flex;
     align-items: center;
+    flex-shrink: 0; /* Don't shrink app name */
 }
 
 .app-name {
@@ -81,12 +85,15 @@ body {
     font-weight: 600;
     color: var(--text-primary);
     letter-spacing: -0.01em;
+    white-space: nowrap;
 }
 
 .header-right {
     display: flex;
     align-items: center;
     gap: var(--space-1);
+    flex-wrap: wrap; /* Allow wrapping on very small screens */
+    overflow: hidden;
 }
 
 .header-btn {
@@ -265,6 +272,55 @@ body {
     border-radius: 3px;
 }
 
+.smoothing-slider {
+    width: 50px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+
+.smoothing-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.smoothing-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s ease;
+}
+
+.smoothing-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+.smoothing-slider::-moz-range-thumb:hover {
+    transform: scale(1.2);
+}
+
+.smoothing-label {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-align: center;
+    display: block;
+    margin-top: 2px;
+}
+
 /* ==================== CANVAS ZONE ==================== */
 .canvas-zone {
     flex: 1;
@@ -320,12 +376,15 @@ body {
     padding: 0 var(--space-4);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    flex-wrap: wrap; /* Allow wrapping on very small screens */
+    min-height: 40px;
 }
 
 .control-group {
     display: flex;
     align-items: center;
     gap: var(--space-1);
+    flex-shrink: 0; /* Don't shrink control groups */
 }
 
 .timeline-btn {
@@ -418,6 +477,9 @@ body {
     color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px; /* Prevent overflow */
 }
 
 .bg-controls {
@@ -498,6 +560,7 @@ body {
     flex-direction: column;
     overflow: hidden;
     border-right: 1px solid var(--border);
+    min-width: 0; /* Allow shrinking */
 }
 
 .frames-scroll {
@@ -508,6 +571,7 @@ body {
     overflow-x: auto;
     overflow-y: hidden;
     align-items: center;
+    min-height: 0;
 }
 
 .frame-item {
@@ -559,6 +623,8 @@ body {
     flex-direction: column;
     background: var(--bg-panel);
     flex-shrink: 0;
+    min-width: 100px; /* Allow compression on small screens */
+    overflow: hidden;
 }
 
 .layers-header {
@@ -620,6 +686,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    min-height: 0; /* Allow flex shrinking */
+    max-height: 100%; /* Prevent overflow */
 }
 
 .layer-item {
@@ -706,44 +774,298 @@ input:focus:not(:focus-visible) {
 }
 
 /* ==================== RESPONSIVE ADJUSTMENTS ==================== */
+
 /* Tablets and smaller screens */
 @media (max-width: 768px) {
     .canvas-zone {
-        padding: var(--space-2); /* Reduce padding on smaller screens */
+        padding: var(--space-2); /* Reduce padding */
     }
     
-    .layers-panel {
-        width: 200px; /* Narrower layer panel */
+    .layers-section {
+        width: 180px; /* Narrower layer panel */
+    }
+    
+    .app-header {
+        padding: 0 var(--space-2); /* Less padding */
+    }
+    
+    .header-right {
+        gap: 2px; /* Tighter button spacing */
+    }
+    
+    .timeline-controls {
+        padding: 0 var(--space-2);
+        gap: var(--space-1);
     }
 }
 
-/* Very small screens / mobile landscape */
-@media (max-height: 500px) {
-    .app-header {
-        height: 40px; /* Shorter header */
+/* Small screens - tablets in portrait, large phones */
+@media (max-width: 600px) {
+    :root {
+        --timeline-height: 160px; /* Compress timeline */
     }
     
     .timeline-panel {
-        height: 120px; /* Compact timeline */
-        min-height: 120px;
+        height: 160px;
+        max-height: 160px;
+    }
+    
+    .layers-section {
+        width: 160px; /* Even narrower */
     }
     
     .frame-item {
-        min-width: 72px; /* Smaller frame thumbnails */
-        height: 54px;
+        min-width: 70px;
+        height: 52px;
+    }
+    
+    .canvas-zone {
+        padding: var(--space-1); /* Minimal padding */
+    }
+    
+    /* Stack background controls vertically */
+    .bg-controls {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+    
+    .timeline-controls {
+        gap: 4px;
+    }
+    
+    /* Hide some dividers to save space */
+    .control-divider:nth-child(n+3) {
+        display: none;
+    }
+}
+
+/* Very small screens / mobile */
+@media (max-width: 480px) {
+    :root {
+        --tool-column-width: 56px; /* Narrower tool column */
+        --timeline-height: 140px;
+    }
+    
+    .app-header {
+        height: 44px; /* Taller for better touch targets */
+        flex-wrap: wrap; /* Allow wrapping if needed */
+        min-height: 44px;
+        padding: 0 4px;
+    }
+    
+    .header-btn {
+        padding: 0 6px;
+        font-size: 12px;
+        min-height: 40px; /* Better touch target */
+        gap: 3px;
+    }
+    
+    .header-divider {
+        display: none; /* Hide dividers to save space */
+    }
+    
+    .timeline-panel {
+        height: 140px;
+        max-height: 140px;
+    }
+    
+    .timeline-controls {
+        height: 36px; /* Shorter controls bar */
+        gap: 2px;
+        padding: 0 4px;
+        overflow-x: auto; /* Allow horizontal scroll if absolutely necessary */
+        overflow-y: hidden;
+    }
+    
+    .timeline-btn {
+        padding: 0 6px;
+        gap: 2px;
+        min-height: 40px; /* Touch-friendly */
+    }
+    
+    .timeline-btn .label {
+        font-size: 10px;
+    }
+    
+    .control-divider {
+        display: none; /* Hide all dividers */
+    }
+    
+    .fps-input {
+        gap: 4px;
+    }
+    
+    .fps-input label {
+        font-size: 10px;
+    }
+    
+    .fps-input input {
+        width: 40px;
+        height: 24px;
+        font-size: 12px;
+    }
+    
+    .frame-counter {
+        font-size: 10px;
+        max-width: 120px;
+    }
+    
+    .layers-section {
+        width: 140px;
+    }
+    
+    .layer-item {
+        padding: 6px;
+        font-size: 11px;
+    }
+    
+    .layer-btn {
+        padding: 0 4px;
+        height: 28px;
+    }
+    
+    .frame-item {
+        min-width: 60px;
+        height: 45px;
+    }
+    
+    .tool-btn {
+        width: 52px;
+        height: 52px; /* Larger touch targets */
+    }
+    
+    .size-btn {
+        width: 52px;
+        height: 36px;
+    }
+    
+    /* Hide some labels on very small screens to save space */
+    .timeline-btn .label {
+        display: none; /* Icon only */
+    }
+    
+    .tool-label {
+        font-size: 9px;
+    }
+    
+    .bg-label {
+        font-size: 10px;
+    }
+    
+    .bg-color-picker {
+        width: 28px;
+        height: 24px;
+    }
+}
+
+/* Very small screens in landscape */
+@media (max-height: 500px) {
+    :root {
+        --header-height: 40px;
+        --timeline-height: 110px;
+    }
+    
+    .app-header {
+        height: 40px;
+        min-height: 40px;
+    }
+    
+    .timeline-panel {
+        height: 110px;
+        max-height: 110px;
+    }
+    
+    .timeline-controls {
+        height: 32px;
+        padding: 0 4px;
+    }
+    
+    .timeline-btn {
+        padding: 0 4px;
+        min-height: 36px;
+    }
+    
+    .layers-section {
+        width: 120px;
+    }
+    
+    .frame-item {
+        min-width: 56px;
+        height: 42px;
+    }
+    
+    .layer-list {
+        max-height: 70px; /* Very compact */
+    }
+    
+    .canvas-zone {
+        padding: 4px;
+    }
+}
+
+/* Tiny screens - very small phones */
+@media (max-width: 360px) {
+    :root {
+        --tool-column-width: 48px;
+    }
+    
+    .tool-btn {
+        width: 44px;
+        height: 48px;
+    }
+    
+    .size-btn {
+        width: 44px;
+        height: 32px;
+    }
+    
+    .section-label,
+    .group-label {
+        display: none; /* Hide labels to save space */
+    }
+    
+    .layers-section {
+        width: 100px;
+    }
+    
+    .header-btn .label {
+        display: none; /* Icon only on tiny screens */
+    }
+    
+    .layer-btn .label {
+        display: none;
+    }
+    
+    .frame-counter {
+        max-width: 80px;
+        font-size: 9px;
     }
 }
 
 /* Touch device improvements */
 @media (pointer: coarse) {
-    /* Larger touch targets on touch devices */
+    /* Minimum touch targets for all interactive elements */
     .timeline-btn,
-    .header-btn {
+    .header-btn,
+    .tool-btn,
+    .layer-btn {
+        min-height: 44px; /* iOS/Android minimum */
+        min-width: 44px;
+    }
+    
+    .size-btn {
         min-height: 40px;
     }
     
-    .tool-btn {
+    .frame-item {
+        min-height: 44px; /* Easier to tap */
+    }
+    
+    /* Larger tap areas for important controls */
+    #playBtn,
+    #stopBtn {
         min-width: 48px;
-        min-height: 48px;
+        min-height: 44px;
     }
 }
