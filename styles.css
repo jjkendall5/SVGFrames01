@@ -272,15 +272,30 @@ body {
     border-radius: 3px;
 }
 
+.smoothing-control {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 4px;
+}
+
 .smoothing-slider {
-    width: 50px;
-    height: 4px;
-    -webkit-appearance: none;
-    appearance: none;
+    -webkit-appearance: slider-vertical;
+    appearance: slider-vertical;
+    width: 4px;
+    height: 60px;
     background: var(--border);
     border-radius: 2px;
     outline: none;
     cursor: pointer;
+    writing-mode: bt-lr; /* For vertical orientation */
+}
+
+/* Firefox vertical slider */
+.smoothing-slider[orient="vertical"] {
+    -webkit-appearance: slider-vertical;
+    writing-mode: bt-lr;
 }
 
 .smoothing-slider::-webkit-slider-thumb {
@@ -314,11 +329,13 @@ body {
 
 .smoothing-label {
     font-size: 9px;
-    font-weight: 600;
+    font-weight: 700;
     color: var(--text-tertiary);
     text-align: center;
     display: block;
-    margin-top: 2px;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    min-width: 12px;
 }
 
 /* ==================== CANVAS ZONE ==================== */

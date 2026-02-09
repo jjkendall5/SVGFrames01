@@ -544,12 +544,12 @@ function updateSmoothingLabel() {
     if (!label) return;
     
     const value = state.smoothing;
-    let text = 'Medium';
+    let text = 'Med';
     
-    if (value <= 1) {
+    if (value <= 1.5) {
         text = 'Low';
-    } else if (value <= 4) {
-        text = 'Medium';
+    } else if (value <= 5) {
+        text = 'Med';
     } else {
         text = 'High';
     }
