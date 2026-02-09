@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>SVG Frame</title>
     <link rel="stylesheet" href="styles.css">
     <!-- gifshot library for reliable client-side GIF encoding without workers -->
@@ -74,6 +74,14 @@
             <div class="tool-section">
                 <span class="section-label">Color</span>
                 <input type="color" id="colorPicker" value="#000000" class="color-picker" title="Color">
+            </div>
+            
+            <div class="tool-divider"></div>
+
+            <div class="tool-section">
+                <span class="section-label">Smoothing</span>
+                <input type="range" id="smoothingSlider" min="0.5" max="8" step="0.5" value="3" class="smoothing-slider" title="Stroke Smoothing">
+                <span id="smoothingLabel" class="smoothing-label">Medium</span>
             </div>
         </aside>
 
