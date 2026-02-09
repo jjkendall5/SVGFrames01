@@ -117,9 +117,29 @@ function setupEventListeners() {
     document.getElementById('duplicateFrameBtn').addEventListener('click', duplicateFrame);
     document.getElementById('deleteFrameBtn').addEventListener('click', deleteFrame);
 
-    // Playback controls
-    document.getElementById('playBtn').addEventListener('click', togglePlayback);
-    document.getElementById('stopBtn').addEventListener('click', stopPlayback);
+    // Playback controls - use both click and pointerup for reliability
+    const playBtn = document.getElementById('playBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    
+    // Ensure buttons work on all devices by handling both click and pointer events
+    playBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // Prevent event from bubbling
+        togglePlayback();
+    });
+    
+    playBtn.addEventListener('pointerdown', (e) => {
+        e.stopPropagation(); // Prevent canvas from capturing
+    });
+    
+    stopBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        stopPlayback();
+    });
+    
+    stopBtn.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+    });
+    
     document.getElementById('fpsInput').addEventListener('change', (e) => {
         state.fps = parseInt(e.target.value) || 12;
         if (state.isPlaying) {
@@ -350,6 +370,12 @@ function stopDrawing(e) {
     // Prevent default if event exists
     if (e) {
         e.preventDefault();
+        
+        // Release pointer capture if it was captured
+        // This is critical for mobile - ensures buttons remain clickable
+        if (e.pointerId !== undefined && svg.hasPointerCapture && svg.hasPointerCapture(e.pointerId)) {
+            svg.releasePointerCapture(e.pointerId);
+        }
     }
     
     if (!state.isDrawing) return;
@@ -678,15 +704,35 @@ function togglePlayback() {
 }
 
 function startPlayback() {
+    // Stop any existing playback first
+    if (state.playInterval) {
+        clearInterval(state.playInterval);
+        state.playInterval = null;
+    }
+    
+    // Update state immediately
     state.isPlaying = true;
+    
+    // Update UI
     const playBtn = document.getElementById('playBtn');
-    playBtn.querySelector('.icon').textContent = '⏸';
-    playBtn.querySelector('.label').textContent = 'Pause';
-    playBtn.title = 'Pause';
+    if (playBtn) {
+        const iconEl = playBtn.querySelector('.icon');
+        const labelEl = playBtn.querySelector('.label');
+        if (iconEl) iconEl.textContent = '⏸';
+        if (labelEl) labelEl.textContent = 'Pause';
+        playBtn.title = 'Pause';
+    }
     
     const frameDelay = 1000 / state.fps;
     
     state.playInterval = setInterval(() => {
+        // Double-check we're still supposed to be playing
+        if (!state.isPlaying) {
+            clearInterval(state.playInterval);
+            state.playInterval = null;
+            return;
+        }
+        
         // Play through max frames across all layers
         state.currentFrameIndex = (state.currentFrameIndex + 1) % state.maxFrames;
         
@@ -697,16 +743,29 @@ function startPlayback() {
 }
 
 function stopPlayback() {
+    // Update state immediately - this is critical for button responsiveness
     state.isPlaying = false;
-    const playBtn = document.getElementById('playBtn');
-    playBtn.querySelector('.icon').textContent = '▶';
-    playBtn.querySelector('.label').textContent = 'Play';
-    playBtn.title = 'Play';
     
+    // Clear interval if it exists
     if (state.playInterval) {
         clearInterval(state.playInterval);
         state.playInterval = null;
     }
+    
+    // Update UI
+    const playBtn = document.getElementById('playBtn');
+    if (playBtn) {
+        const iconEl = playBtn.querySelector('.icon');
+        const labelEl = playBtn.querySelector('.label');
+        if (iconEl) iconEl.textContent = '▶';
+        if (labelEl) labelEl.textContent = 'Play';
+        playBtn.title = 'Play';
+    }
+    
+    // Force a final render to ensure UI is in sync
+    renderFrame();
+    updateFrameList();
+    updateFrameCounter();
 }
 
 // ==================== UNDO/REDO ====================
