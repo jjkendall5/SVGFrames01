@@ -13,6 +13,15 @@
     <header class="app-header">
         <div class="header-left">
             <span class="app-name">SVG Frame</span>
+            <div class="canvas-size-selector">
+                <label class="canvas-size-label">Canvas</label>
+                <select id="canvasSizeSelect" class="canvas-size-select">
+                    <option value="600x600" selected>600×600</option>
+                    <option value="1280x720">1280×720 (HD)</option>
+                    <option value="1920x1080">1920×1080 (FHD)</option>
+                    <option value="custom">Custom...</option>
+                </select>
+            </div>
         </div>
         <div class="header-right">
             <button id="undoBtn" class="header-btn" title="Undo (Ctrl+Z)">
@@ -55,41 +64,47 @@
 
             <div class="tool-section">
                 <span class="section-label">Size</span>
-                <button class="size-btn active" data-size="2" title="Small">
-                    <div class="size-dot" style="width: 2px; height: 2px;"></div>
-                    <span class="size-label">S</span>
-                </button>
-                <button class="size-btn" data-size="5" title="Medium">
-                    <div class="size-dot" style="width: 5px; height: 5px;"></div>
-                    <span class="size-label">M</span>
-                </button>
-                <button class="size-btn" data-size="10" title="Large">
-                    <div class="size-dot" style="width: 10px; height: 10px;"></div>
-                    <span class="size-label">L</span>
-                </button>
+                <div class="size-control">
+                    <input type="range" id="sizeSlider" min="1" max="20" step="1" value="2" class="size-slider" orient="vertical" title="Brush Size">
+                    <span id="sizeValue" class="size-value">2</span>
+                </div>
             </div>
 
+            <div class="tool-divider"></div>
+
+            <div class="tool-section">
+                <span class="section-label">Taper</span>
+                <div class="taper-control">
+                    <input type="range" id="taperSlider" min="0" max="100" step="5" value="0" class="taper-slider" orient="vertical" title="Stroke Taper">
+                    <span id="taperValue" class="taper-value">0%</span>
+                </div>
+            </div>
+            
+            <div class="tool-divider"></div>
+
+            <div class="tool-section">
+                <span class="section-label">Smooth</span>
+                <div class="smoothing-control">
+                    <input type="range" id="smoothingSlider" min="0.5" max="8" step="0.5" value="3" class="smoothing-slider" orient="vertical" title="Stroke Smoothing">
+                    <div id="smoothingIndicator" class="smoothing-indicator">
+                        <span class="level-label">High</span>
+                        <span class="level-label active">Med</span>
+                        <span class="level-label">Low</span>
+                    </div>
+                </div>
+            </div>
+            
             <div class="tool-divider"></div>
 
             <div class="tool-section">
                 <span class="section-label">Color</span>
                 <input type="color" id="colorPicker" value="#000000" class="color-picker" title="Color">
             </div>
-            
-            <div class="tool-divider"></div>
-
-            <div class="tool-section">
-                <span class="section-label">Smoothing</span>
-                <div class="smoothing-control">
-                    <input type="range" id="smoothingSlider" min="0.5" max="8" step="0.5" value="3" class="smoothing-slider" orient="vertical" title="Stroke Smoothing">
-                    <span id="smoothingLabel" class="smoothing-label">Med</span>
-                </div>
-            </div>
         </aside>
 
         <!-- Center: Canvas -->
         <main class="canvas-zone">
-            <svg id="mainSvg" width="800" height="600" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
+            <svg id="mainSvg" width="600" height="600" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg">
                 <rect id="backgroundRect" width="100%" height="100%" fill="#ffffff"/>
                 <g id="onionSkinLayer" opacity="0.3"></g>
                 <g id="layersContainer"></g>
@@ -104,19 +119,22 @@
             <div class="control-group">
                 <button id="playBtn" class="timeline-btn primary" title="Play/Pause">
                     <span class="icon">▶</span>
-                    <span class="label">Play</span>
                 </button>
                 <button id="stopBtn" class="timeline-btn" title="Stop">
                     <span class="icon">⏹</span>
-                    <span class="label">Stop</span>
                 </button>
                 <div class="fps-input">
                     <label>FPS</label>
-                    <input type="number" id="fpsInput" value="12" min="1" max="60">
+                    <select id="fpsSelect" class="fps-select">
+                        <option value="8">8</option>
+                        <option value="12" selected>12</option>
+                        <option value="15">15</option>
+                        <option value="24">24</option>
+                        <option value="30">30</option>
+                        <option value="60">60</option>
+                    </select>
                 </div>
             </div>
-
-            <div class="control-divider"></div>
 
             <div class="control-group">
                 <button id="onionSkinToggle" class="timeline-btn" title="Onion Skin (O)">
@@ -124,42 +142,33 @@
                         <circle cx="10" cy="10" r="7" opacity="0.3"/>
                         <circle cx="10" cy="10" r="4"/>
                     </svg>
-                    <span class="label">Onion</span>
                 </button>
             </div>
 
-            <div class="control-divider"></div>
-
             <div class="control-group bg-controls">
-                <label class="bg-label">Background</label>
+                <label class="bg-label">BG</label>
                 <input type="color" id="backgroundColorPicker" value="#ffffff" class="bg-color-picker" title="Background Color">
                 <label class="transparent-toggle">
                     <input type="checkbox" id="transparentBgToggle">
-                    <span>Transparent</span>
+                    <span class="trans-icon">⬜</span>
                 </label>
             </div>
-
-            <div class="control-divider"></div>
 
             <div class="control-group">
                 <button id="addFrameBtn" class="timeline-btn" title="Add Frame">
                     <span class="icon">+</span>
-                    <span class="label">Add</span>
                 </button>
                 <button id="duplicateFrameBtn" class="timeline-btn" title="Duplicate Frame">
                     <span class="icon">⧉</span>
-                    <span class="label">Duplicate</span>
                 </button>
                 <button id="deleteFrameBtn" class="timeline-btn" title="Delete Frame">
                     <span class="icon">×</span>
-                    <span class="label">Delete</span>
                 </button>
             </div>
 
-            <div class="control-divider"></div>
-
             <div class="control-group">
-                <span id="frameCounter" class="frame-counter">1 / 1</span>
+                <label class="frame-label">Frame</label>
+                <span id="frameCounter" class="frame-counter">1/1</span>
             </div>
         </div>
 
@@ -173,29 +182,34 @@
 
             <!-- Layers Section (part of timeline zone) -->
             <div class="layers-section">
-                <div class="layers-header">
-                    <span class="section-label">Layers</span>
-                    <div class="layer-actions">
-                        <button id="addLayerBtn" class="layer-btn" title="Add Layer">
-                            <span class="icon">+</span>
-                            <span class="label">Add</span>
-                        </button>
-                        <button id="deleteLayerBtn" class="layer-btn" title="Delete Layer">
-                            <span class="icon">−</span>
-                            <span class="label">Delete</span>
-                        </button>
-                        <button id="clearFrameBtn" class="layer-btn" title="Clear Layer">
-                            <span class="icon">×</span>
-                            <span class="label">Clear</span>
-                        </button>
-                    </div>
-                </div>
                 <div id="layerList" class="layer-list">
                     <!-- Layer items inserted here -->
                 </div>
+                <button id="addLayerBtn" class="add-layer-btn" title="Add Layer">
+                    <span class="icon">+</span>
+                    <span class="label">New Layer</span>
+                </button>
             </div>
         </div>
     </section>
+
+    <!-- Modal Dialog -->
+    <div id="modal" class="modal" style="display: none;">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Title</h3>
+                <button class="modal-close" id="modalCloseBtn">×</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Content inserted dynamically -->
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn secondary" id="modalCancelBtn">Cancel</button>
+                <button class="modal-btn primary" id="modalConfirmBtn">Confirm</button>
+            </div>
+        </div>
+    </div>
 
     <script src="main.js"></script>
 </body>

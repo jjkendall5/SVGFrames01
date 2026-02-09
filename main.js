@@ -22,7 +22,10 @@ const state = {
     strokeSize: 2,
     strokeColor: '#000000',
     smoothing: 3, // Smoothing amount (0.5 = low, 3 = medium, 8 = high)
+    taper: 0, // Taper amount (0-100, 0 = uniform stroke, 100 = maximum taper)
     backgroundColor: '#ffffff', // Global background color
+    canvasWidth: 600, // Canvas width
+    canvasHeight: 600, // Canvas height
     onionSkinEnabled: true,
     isPlaying: false,
     playInterval: null,
@@ -39,6 +42,8 @@ function init() {
     syncBackgroundUI(); // Sync UI with loaded state
     updateBackground(); // Set initial background
     updateSmoothingLabel(); // Set initial smoothing label
+    updateSizeValue(); // Set initial size value
+    updateTaperValue(); // Set initial taper value
     renderFrame();
     updateLayerList();
     updateFrameList();
@@ -61,13 +66,10 @@ function setupEventListeners() {
     document.getElementById('penTool').addEventListener('click', () => selectTool('pen'));
     document.getElementById('eraserTool').addEventListener('click', () => selectTool('eraser'));
 
-    // Stroke size buttons
-    document.querySelectorAll('.size-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
-            e.target.closest('.size-btn').classList.add('active');
-            state.strokeSize = parseInt(e.target.closest('.size-btn').dataset.size);
-        });
+    // Size slider
+    document.getElementById('sizeSlider').addEventListener('input', (e) => {
+        state.strokeSize = parseInt(e.target.value);
+        updateSizeValue();
     });
 
     // Color picker
@@ -79,6 +81,28 @@ function setupEventListeners() {
     document.getElementById('smoothingSlider').addEventListener('input', (e) => {
         state.smoothing = parseFloat(e.target.value);
         updateSmoothingLabel();
+    });
+    
+    // Taper slider
+    document.getElementById('taperSlider').addEventListener('input', (e) => {
+        state.taper = parseInt(e.target.value);
+        updateTaperValue();
+    });
+    
+    // Canvas size selector
+    document.getElementById('canvasSizeSelect').addEventListener('change', (e) => {
+        const value = e.target.value;
+        
+        if (value === 'custom') {
+            // Show custom size dialog
+            showCanvasSizeDialog();
+            // Reset selector to current size
+            e.target.value = `${state.canvasWidth}x${state.canvasHeight}`;
+        } else {
+            // Preset size
+            const [width, height] = value.split('x').map(Number);
+            updateCanvasSize(width, height);
+        }
     });
 
     // Onion skin toggle
@@ -115,10 +139,6 @@ function setupEventListeners() {
 
     // Layer controls
     document.getElementById('addLayerBtn').addEventListener('click', addLayer);
-    document.getElementById('deleteLayerBtn').addEventListener('click', deleteLayer);
-
-    // Clear frame
-    document.getElementById('clearFrameBtn').addEventListener('click', clearCurrentFrame);
 
     // Frame controls
     document.getElementById('addFrameBtn').addEventListener('click', addFrame);
@@ -148,7 +168,7 @@ function setupEventListeners() {
         e.stopPropagation();
     });
     
-    document.getElementById('fpsInput').addEventListener('change', (e) => {
+    document.getElementById('fpsSelect').addEventListener('change', (e) => {
         state.fps = parseInt(e.target.value) || 12;
         if (state.isPlaying) {
             stopPlayback();
@@ -231,25 +251,29 @@ function addLayer() {
 
 function deleteLayer() {
     if (state.layers.length === 1) {
-        alert('Cannot delete the only layer!');
+        showAlert('Cannot delete the only layer!', 'Error');
         return;
     }
     
-    if (confirm('Delete this layer and all its frames?')) {
-        const layerIndex = state.layers.findIndex(l => l.id === state.currentLayerId);
-        state.layers.splice(layerIndex, 1);
-        
-        // Select another layer
-        state.currentLayerId = state.layers[Math.max(0, layerIndex - 1)].id;
-        
-        // Recalculate max frames
-        updateMaxFrames();
-        
-        updateLayerList();
-        updateFrameList();
-        renderFrame();
-        saveToLocalStorage();
-    }
+    showConfirm(
+        'Delete this layer and all its frames?',
+        'Delete Layer',
+        () => {
+            const layerIndex = state.layers.findIndex(l => l.id === state.currentLayerId);
+            state.layers.splice(layerIndex, 1);
+            
+            // Select another layer
+            state.currentLayerId = state.layers[Math.max(0, layerIndex - 1)].id;
+            
+            // Recalculate max frames
+            updateMaxFrames();
+            
+            updateLayerList();
+            updateFrameList();
+            renderFrame();
+            saveToLocalStorage();
+        }
+    );
 }
 
 function selectLayer(layerId) {
@@ -290,13 +314,32 @@ function updateLayerList() {
             updateLayerList();
         });
         
-        // Layer name with frame count
+        // Layer name
         const nameSpan = document.createElement('span');
         nameSpan.className = 'layer-name';
-        nameSpan.textContent = `${layer.name} (${layer.frames.length})`;
+        nameSpan.textContent = layer.name;
+        
+        // Frame count (compact)
+        const frameCount = document.createElement('span');
+        frameCount.className = 'layer-frame-count';
+        frameCount.textContent = layer.frames.length;
+        
+        // Delete button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'layer-delete-btn';
+        deleteBtn.innerHTML = '×';
+        deleteBtn.title = 'Delete Layer';
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (state.layers.length > 1) {
+                deleteLayer(layer.id);
+            }
+        });
         
         layerItem.appendChild(checkbox);
         layerItem.appendChild(nameSpan);
+        layerItem.appendChild(frameCount);
+        layerItem.appendChild(deleteBtn);
         
         layerItem.addEventListener('click', () => selectLayer(layer.id));
         layerList.appendChild(layerItem);
@@ -337,16 +380,25 @@ function startDrawing(e) {
     
     // Create new path element
     state.currentPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    state.currentPath.setAttribute('fill', 'none');
-    state.currentPath.setAttribute('stroke', state.strokeColor);
     
-    // Support pressure-sensitive input (Apple Pencil, etc.)
-    const pressure = e.pressure || 0.5; // Default to 0.5 if no pressure data
-    const strokeWidth = state.strokeSize * (0.5 + pressure); // Scale by pressure
-    
-    state.currentPath.setAttribute('stroke-width', strokeWidth);
-    state.currentPath.setAttribute('stroke-linecap', 'round');
-    state.currentPath.setAttribute('stroke-linejoin', 'round');
+    // Dual-mode brush: tapered (filled) vs uniform (stroked)
+    if (state.taper > 0 && state.tool === 'pen') {
+        // TAPERED MODE: Filled outline path
+        state.currentPath.setAttribute('fill', state.strokeColor);
+        state.currentPath.setAttribute('stroke', 'none');
+    } else {
+        // UNIFORM MODE: Standard stroked path (existing behavior)
+        state.currentPath.setAttribute('fill', 'none');
+        state.currentPath.setAttribute('stroke', state.strokeColor);
+        
+        // Support pressure-sensitive input (Apple Pencil, etc.)
+        const pressure = e.pressure || 0.5; // Default to 0.5 if no pressure data
+        const strokeWidth = state.strokeSize * (0.5 + pressure); // Scale by pressure
+        
+        state.currentPath.setAttribute('stroke-width', strokeWidth);
+        state.currentPath.setAttribute('stroke-linecap', 'round');
+        state.currentPath.setAttribute('stroke-linejoin', 'round');
+    }
     
     if (state.tool === 'eraser') {
         state.currentPath.setAttribute('stroke', 'white');
@@ -379,7 +431,6 @@ function draw(e) {
             );
             
             // Only add point if it's far enough from the last point
-            // Lower smoothing = smaller minimum distance = more points captured
             const minDistance = state.smoothing;
             if (distance < minDistance) {
                 return; // Skip this point
@@ -392,11 +443,22 @@ function draw(e) {
         // Apply averaging for additional smoothing
         const smoothedPoints = applyPointAveraging(state.currentPoints, state.smoothing);
         
-        // Update path with smoothed curve
-        const pathData = pointsToPath(smoothedPoints);
-        state.currentPath.setAttribute('d', pathData);
+        // Dual-mode brush: tapered vs uniform
+        if (state.taper > 0) {
+            // TAPERED MODE: Generate filled outline path
+            const pathData = createTaperedPath(
+                smoothedPoints,
+                state.strokeSize,
+                state.taper / 100 // Convert 0-100 to 0-1
+            );
+            state.currentPath.setAttribute('d', pathData);
+        } else {
+            // UNIFORM MODE: Generate standard stroke path (existing)
+            const pathData = pointsToPath(smoothedPoints);
+            state.currentPath.setAttribute('d', pathData);
+        }
     } else {
-        // Eraser: no smoothing
+        // Eraser: no smoothing, no taper
         state.currentPoints.push(point);
         const pathData = pointsToPath(state.currentPoints);
         state.currentPath.setAttribute('d', pathData);
@@ -450,6 +512,117 @@ function applyPointAveraging(points, smoothing) {
     return smoothed;
 }
 
+// ==================== TAPER FUNCTIONS ====================
+/**
+ * Calculate stroke width at a given position along the stroke
+ * Uses sine wave for smooth, natural taper
+ * @param {number} progress - Position along stroke (0.0 to 1.0)
+ * @param {number} baseWidth - Base stroke width
+ * @param {number} taperAmount - Taper intensity (0.0 to 1.0)
+ * @returns {number} - Calculated width at this position
+ */
+function calculateTaperedWidth(progress, baseWidth, taperAmount) {
+    if (taperAmount === 0) {
+        return baseWidth; // No taper, uniform stroke
+    }
+    
+    // Ease-in-out curve: thin at start/end, thick in middle
+    // Using sine wave for smooth, natural taper
+    const curve = Math.sin(progress * Math.PI); // 0 → 1 → 0
+    
+    // Interpolate between minimum width and base width
+    // At 100% taper, reduces to 30% at ends
+    const minWidth = baseWidth * (1 - taperAmount * 0.7);
+    const width = minWidth + (baseWidth - minWidth) * curve;
+    
+    return Math.max(width, 0.5); // Ensure minimum viable width
+}
+
+/**
+ * Get normalized tangent vector between two points
+ */
+function getTangent(p1, p2) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    
+    if (length === 0) return { x: 1, y: 0 }; // Fallback for zero-length
+    
+    return {
+        x: dx / length,
+        y: dy / length
+    };
+}
+
+/**
+ * Convert a tapered stroke into a filled SVG path
+ * Creates outline by offsetting points perpendicular to stroke direction
+ * @param {Array} points - Array of {x, y} coordinates
+ * @param {number} baseWidth - Base stroke width
+ * @param {number} taperAmount - Taper intensity (0-1)
+ * @returns {string} - SVG path data for filled outline
+ */
+function createTaperedPath(points, baseWidth, taperAmount) {
+    if (points.length < 2) {
+        // Fallback for very short strokes
+        return `M ${points[0].x} ${points[0].y}`;
+    }
+    
+    const leftSide = [];
+    const rightSide = [];
+    
+    // Calculate perpendicular offset at each point
+    for (let i = 0; i < points.length; i++) {
+        const progress = i / (points.length - 1);
+        const width = calculateTaperedWidth(progress, baseWidth, taperAmount);
+        const halfWidth = width / 2;
+        
+        // Get tangent direction
+        let tangent;
+        if (i === 0) {
+            // First point: use direction to next point
+            tangent = getTangent(points[0], points[1]);
+        } else if (i === points.length - 1) {
+            // Last point: use direction from previous point
+            tangent = getTangent(points[i - 1], points[i]);
+        } else {
+            // Middle points: average direction
+            tangent = getTangent(points[i - 1], points[i + 1]);
+        }
+        
+        // Perpendicular = rotate tangent 90°
+        const perpendicular = { x: -tangent.y, y: tangent.x };
+        
+        // Calculate offset points
+        leftSide.push({
+            x: points[i].x + perpendicular.x * halfWidth,
+            y: points[i].y + perpendicular.y * halfWidth
+        });
+        
+        rightSide.push({
+            x: points[i].x - perpendicular.x * halfWidth,
+            y: points[i].y - perpendicular.y * halfWidth
+        });
+    }
+    
+    // Build closed path: left side → right side reversed → close
+    let pathData = `M ${leftSide[0].x} ${leftSide[0].y}`;
+    
+    // Left side (forward)
+    for (let i = 1; i < leftSide.length; i++) {
+        pathData += ` L ${leftSide[i].x} ${leftSide[i].y}`;
+    }
+    
+    // Right side (reversed)
+    for (let i = rightSide.length - 1; i >= 0; i--) {
+        pathData += ` L ${rightSide[i].x} ${rightSide[i].y}`;
+    }
+    
+    pathData += ' Z'; // Close path
+    
+    return pathData;
+}
+
 function stopDrawing(e) {
     // Prevent default if event exists
     if (e) {
@@ -470,11 +643,12 @@ function stopDrawing(e) {
         const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
         
         if (currentLayer && currentLayer.frames[state.currentFrameIndex]) {
-            // Store the path data
+            // Store the path data (with fill for tapered strokes)
             const pathData = {
                 d: state.currentPath.getAttribute('d'),
                 stroke: state.currentPath.getAttribute('stroke'),
                 strokeWidth: state.currentPath.getAttribute('stroke-width'),
+                fill: state.currentPath.getAttribute('fill'), // NEW: Store fill for tapered strokes
                 tool: state.tool
             };
             
@@ -538,23 +712,170 @@ function pointsToPath(points) {
     return path;
 }
 
-// Update smoothing label based on current value
+// Update smoothing indicator labels based on current value
 function updateSmoothingLabel() {
-    const label = document.getElementById('smoothingLabel');
-    if (!label) return;
+    const indicator = document.getElementById('smoothingIndicator');
+    if (!indicator) return;
     
+    const labels = indicator.querySelectorAll('.level-label');
     const value = state.smoothing;
-    let text = 'Med';
     
+    // Remove all active states
+    labels.forEach(label => label.classList.remove('active'));
+    
+    // Set active label based on value
     if (value <= 1.5) {
-        text = 'Low';
+        // Low smoothing - bottom label
+        labels[2].classList.add('active');
     } else if (value <= 5) {
-        text = 'Med';
+        // Medium smoothing - middle label
+        labels[1].classList.add('active');
     } else {
-        text = 'High';
+        // High smoothing - top label
+        labels[0].classList.add('active');
+    }
+}
+
+// Update size value display
+function updateSizeValue() {
+    const sizeValue = document.getElementById('sizeValue');
+    if (!sizeValue) return;
+    
+    sizeValue.textContent = state.strokeSize;
+}
+
+// Update taper value display
+function updateTaperValue() {
+    const taperValue = document.getElementById('taperValue');
+    if (!taperValue) return;
+    
+    taperValue.textContent = `${state.taper}%`;
+}
+
+// ==================== MODAL DIALOG ====================
+function openModal(title, bodyHTML, onConfirm) {
+    const modal = document.getElementById('modal');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalBody = document.getElementById('modalBody');
+    const modalConfirmBtn = document.getElementById('modalConfirmBtn');
+    const modalCancelBtn = document.getElementById('modalCancelBtn');
+    const modalCloseBtn = document.getElementById('modalCloseBtn');
+    
+    // Set content
+    modalTitle.textContent = title;
+    modalBody.innerHTML = bodyHTML;
+    
+    // Show modal
+    modal.style.display = 'flex';
+    
+    // Focus first input if exists
+    setTimeout(() => {
+        const firstInput = modalBody.querySelector('input');
+        if (firstInput) firstInput.focus();
+    }, 100);
+    
+    // Handle confirm
+    modalConfirmBtn.onclick = () => {
+        if (onConfirm) {
+            onConfirm();
+        } else {
+            closeModal();
+        }
+    };
+    
+    // Handle cancel/close
+    modalCancelBtn.onclick = closeModal;
+    modalCloseBtn.onclick = closeModal;
+    
+    // Close on backdrop click
+    modal.querySelector('.modal-backdrop').onclick = closeModal;
+    
+    // Close on Escape key
+    const escapeHandler = (e) => {
+        if (e.key === 'Escape') {
+            closeModal();
+            document.removeEventListener('keydown', escapeHandler);
+        }
+    };
+    document.addEventListener('keydown', escapeHandler);
+}
+
+function closeModal() {
+    document.getElementById('modal').style.display = 'none';
+}
+
+function showAlert(message, title = 'Notice') {
+    openModal(title, `<p class="modal-message">${message}</p>`, () => {
+        closeModal();
+    });
+    
+    // Hide cancel button for alerts
+    document.getElementById('modalCancelBtn').style.display = 'none';
+    document.getElementById('modalConfirmBtn').textContent = 'OK';
+}
+
+function showConfirm(message, title, onConfirm) {
+    openModal(title, `<p class="modal-message">${message}</p>`, () => {
+        closeModal();
+        if (onConfirm) onConfirm();
+    });
+    
+    // Show both buttons
+    document.getElementById('modalCancelBtn').style.display = 'block';
+    document.getElementById('modalConfirmBtn').textContent = 'Confirm';
+}
+
+function showCanvasSizeDialog() {
+    const bodyHTML = `
+        <div class="modal-input-group">
+            <label>Width (px)</label>
+            <input type="number" id="modalCanvasWidth" value="${state.canvasWidth}" min="1" max="4000">
+        </div>
+        <div class="modal-input-group">
+            <label>Height (px)</label>
+            <input type="number" id="modalCanvasHeight" value="${state.canvasHeight}" min="1" max="4000">
+        </div>
+    `;
+    
+    openModal('Custom Canvas Size', bodyHTML, () => {
+        const width = parseInt(document.getElementById('modalCanvasWidth').value);
+        const height = parseInt(document.getElementById('modalCanvasHeight').value);
+        
+        if (width > 0 && height > 0 && width <= 4000 && height <= 4000) {
+            updateCanvasSize(width, height);
+            closeModal();
+        } else {
+            showAlert('Invalid dimensions. Width and height must be between 1 and 4000.', 'Invalid Input');
+        }
+    });
+    
+    // Show both buttons
+    document.getElementById('modalCancelBtn').style.display = 'block';
+    document.getElementById('modalConfirmBtn').textContent = 'Apply';
+}
+
+// Update canvas size
+function updateCanvasSize(width, height) {
+    state.canvasWidth = width;
+    state.canvasHeight = height;
+    
+    // Update SVG dimensions
+    svg.setAttribute('width', width);
+    svg.setAttribute('height', height);
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    
+    // Update background rect
+    const bgRect = document.getElementById('backgroundRect');
+    if (bgRect) {
+        bgRect.setAttribute('width', '100%');
+        bgRect.setAttribute('height', '100%');
     }
     
-    label.textContent = text;
+    // Re-render current frame
+    renderFrame();
+    
+    // Save to localStorage
+    saveToLocalStorage();
 }
 
 // ==================== RENDERING ====================
@@ -629,11 +950,26 @@ function renderFrame() {
 function createPathElement(pathData) {
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', pathData.d);
-    path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', pathData.stroke);
-    path.setAttribute('stroke-width', pathData.strokeWidth);
-    path.setAttribute('stroke-linecap', 'round');
-    path.setAttribute('stroke-linejoin', 'round');
+    
+    // Dual-mode rendering: tapered (filled) vs uniform (stroked)
+    if (pathData.fill && pathData.fill !== 'none') {
+        // TAPERED MODE: Filled outline path
+        path.setAttribute('fill', pathData.fill);
+        path.setAttribute('stroke', pathData.stroke || 'none');
+    } else {
+        // UNIFORM MODE: Standard stroked path (existing and legacy)
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', pathData.stroke);
+        path.setAttribute('stroke-width', pathData.strokeWidth);
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+    }
+    
+    // Eraser blending
+    if (pathData.tool === 'eraser') {
+        path.style.mixBlendMode = 'destination-out';
+    }
+    
     return path;
 }
 
@@ -710,29 +1046,33 @@ function deleteFrame() {
     const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
     
     if (!currentLayer || currentLayer.frames.length === 1) {
-        alert('Cannot delete the only frame on this layer!');
+        showAlert('Cannot delete the only frame on this layer!', 'Error');
         return;
     }
     
     if (!currentLayer.frames[state.currentFrameIndex]) {
-        alert('No frame at this position on current layer!');
+        showAlert('No frame at this position on current layer!', 'Error');
         return;
     }
     
-    if (confirm('Delete this frame from current layer?')) {
-        currentLayer.frames.splice(state.currentFrameIndex, 1);
-        
-        if (state.currentFrameIndex >= currentLayer.frames.length) {
-            state.currentFrameIndex = currentLayer.frames.length - 1;
+    showConfirm(
+        'Delete this frame from current layer?',
+        'Delete Frame',
+        () => {
+            currentLayer.frames.splice(state.currentFrameIndex, 1);
+            
+            if (state.currentFrameIndex >= currentLayer.frames.length) {
+                state.currentFrameIndex = currentLayer.frames.length - 1;
+            }
+            
+            updateMaxFrames();
+            updateFrameList();
+            updateLayerList();
+            updateFrameCounter();
+            renderFrame();
+            saveToLocalStorage();
         }
-        
-        updateMaxFrames();
-        updateFrameList();
-        updateLayerList();
-        updateFrameCounter();
-        renderFrame();
-        saveToLocalStorage();
-    }
+    );
 }
 
 function selectFrame(index) {
@@ -794,7 +1134,7 @@ function updateFrameCounter() {
     const frameCount = currentLayer ? currentLayer.frames.length : 0;
     
     document.getElementById('frameCounter').textContent = 
-        `Frame: ${state.currentFrameIndex + 1} / ${frameCount} (Layer: ${currentLayer ? currentLayer.name : 'None'})`;
+        `${state.currentFrameIndex + 1}/${frameCount}`;
 }
 
 // ==================== PLAYBACK ====================
@@ -816,13 +1156,11 @@ function startPlayback() {
     // Update state immediately
     state.isPlaying = true;
     
-    // Update UI
+    // Update UI - icon only
     const playBtn = document.getElementById('playBtn');
     if (playBtn) {
         const iconEl = playBtn.querySelector('.icon');
-        const labelEl = playBtn.querySelector('.label');
         if (iconEl) iconEl.textContent = '⏸';
-        if (labelEl) labelEl.textContent = 'Pause';
         playBtn.title = 'Pause';
     }
     
@@ -855,13 +1193,11 @@ function stopPlayback() {
         state.playInterval = null;
     }
     
-    // Update UI
+    // Update UI - icon only
     const playBtn = document.getElementById('playBtn');
     if (playBtn) {
         const iconEl = playBtn.querySelector('.icon');
-        const labelEl = playBtn.querySelector('.label');
         if (iconEl) iconEl.textContent = '▶';
-        if (labelEl) labelEl.textContent = 'Play';
         playBtn.title = 'Play';
     }
     
@@ -977,7 +1313,7 @@ function loadFromLocalStorage() {
                 resetToDefault();
             }
             
-            document.getElementById('fpsInput').value = state.fps;
+            document.getElementById('fpsSelect').value = state.fps;
             // Background UI will be synced in init() via syncBackgroundUI()
         }
     } catch (e) {
@@ -1039,11 +1375,11 @@ function importProject(e) {
                 state.currentLayerId = state.layers[0].id;
                 updateMaxFrames();
             } else {
-                alert('Unsupported project format!');
+                showAlert('Unsupported project format!', 'Import Error');
                 return;
             }
             
-            document.getElementById('fpsInput').value = state.fps;
+            document.getElementById('fpsSelect').value = state.fps;
             syncBackgroundUI();
             
             updateBackground();
@@ -1053,9 +1389,9 @@ function importProject(e) {
             updateFrameCounter();
             saveToLocalStorage();
             
-            alert('Project imported successfully!');
+            showAlert('Project imported successfully!', 'Success');
         } catch (err) {
-            alert('Failed to import project: ' + err.message);
+            showAlert('Failed to import project: ' + err.message, 'Import Error');
         }
     };
     reader.readAsText(file);
@@ -1067,7 +1403,7 @@ function importProject(e) {
 async function exportAsGIF() {
     // Check if gifshot is available
     if (typeof gifshot === 'undefined') {
-        alert('GIF library not loaded. Please refresh the page and try again.');
+        showAlert('GIF library not loaded. Please refresh the page and try again.', 'Error');
         return;
     }
     
@@ -1086,10 +1422,10 @@ async function exportAsGIF() {
     try {
         console.log(`Starting GIF export: ${state.maxFrames} frames at ${state.fps} FPS`);
         
-        // Create temporary canvas for rendering
+        // Create temporary canvas for rendering (use current canvas size)
         const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = 800;
-        tempCanvas.height = 600;
+        tempCanvas.width = state.canvasWidth;
+        tempCanvas.height = state.canvasHeight;
         const tempCtx = tempCanvas.getContext('2d');
         
         const images = [];
@@ -1103,12 +1439,12 @@ async function exportAsGIF() {
             await new Promise(resolve => setTimeout(resolve, 10));
             
             // Clear canvas
-            tempCtx.clearRect(0, 0, 800, 600);
+            tempCtx.clearRect(0, 0, state.canvasWidth, state.canvasHeight);
             
             // Draw background
             if (state.backgroundColor !== 'transparent') {
                 tempCtx.fillStyle = state.backgroundColor;
-                tempCtx.fillRect(0, 0, 800, 600);
+                tempCtx.fillRect(0, 0, state.canvasWidth, state.canvasHeight);
             }
             
             // Render all visible layers at this frame index
@@ -1124,8 +1460,8 @@ async function exportAsGIF() {
         // Create GIF using gifshot
         gifshot.createGIF({
             images: images,
-            gifWidth: 800,
-            gifHeight: 600,
+            gifWidth: state.canvasWidth,
+            gifHeight: state.canvasHeight,
             interval: 1 / state.fps, // Interval in seconds
             numFrames: state.maxFrames,
             frameDuration: 1, // Frame duration multiplier
@@ -1155,7 +1491,7 @@ async function exportAsGIF() {
                 }, 100);
             } else {
                 console.error('GIF encoding error:', obj.error);
-                alert('Failed to encode GIF: ' + obj.error);
+                showAlert('Failed to encode GIF: ' + obj.error, 'Export Error');
                 if (document.body.contains(loading)) {
                     document.body.removeChild(loading);
                 }
@@ -1166,7 +1502,7 @@ async function exportAsGIF() {
         
     } catch (err) {
         console.error('GIF export error:', err);
-        alert('Failed to export GIF: ' + err.message);
+        showAlert('Failed to export GIF: ' + err.message, 'Export Error');
         if (document.body.contains(loading)) {
             document.body.removeChild(loading);
         }
@@ -1234,7 +1570,7 @@ function exportAsSVGSequence() {
             showDownloadModal(svgFiles);
             
         } catch (err) {
-            alert('Failed to export: ' + err.message);
+            showAlert('Failed to export: ' + err.message, 'Export Error');
         } finally {
             document.body.removeChild(loading);
         }
