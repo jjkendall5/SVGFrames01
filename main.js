@@ -385,12 +385,20 @@ function stopDrawing(e) {
 function getSvgPoint(e) {
     const rect = svg.getBoundingClientRect();
     
-    // Use clientX/clientY which works for mouse, touch, and pointer events
-    // Pointer Events API normalizes coordinates across all input types
-    return {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top
-    };
+    // Get the SVG's viewBox dimensions
+    const viewBox = svg.viewBox.baseVal;
+    const viewBoxWidth = viewBox.width;
+    const viewBoxHeight = viewBox.height;
+    
+    // Calculate the scale between screen size and viewBox size
+    const scaleX = viewBoxWidth / rect.width;
+    const scaleY = viewBoxHeight / rect.height;
+    
+    // Map screen coordinates to viewBox coordinates
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    
+    return { x, y };
 }
 
 // Convert points array to SVG path data with smoothing
