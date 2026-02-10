@@ -63,6 +63,18 @@
             <div class="tool-divider"></div>
 
             <div class="tool-section">
+                <button id="constraintToggle" class="tool-btn constraint-btn" title="Constraint Mode - Straight Lines & Circles">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="3" y1="17" x2="17" y2="3"/>
+                        <circle cx="10" cy="10" r="6"/>
+                    </svg>
+                    <span class="tool-label">Constraint</span>
+                </button>
+            </div>
+
+            <div class="tool-divider"></div>
+
+            <div class="tool-section">
                 <span class="section-label">Size</span>
                 <div class="size-control">
                     <input type="range" id="sizeSlider" min="1" max="20" step="1" value="2" class="size-slider" orient="vertical" title="Brush Size">
@@ -117,11 +129,8 @@
         <!-- Timeline Controls Row -->
         <div class="timeline-controls">
             <div class="control-group">
-                <button id="playBtn" class="timeline-btn primary" title="Play/Pause">
+                <button id="playBtn" class="timeline-btn primary" title="Play/Stop">
                     <span class="icon">▶</span>
-                </button>
-                <button id="stopBtn" class="timeline-btn" title="Stop">
-                    <span class="icon">⏹</span>
                 </button>
                 <div class="fps-input">
                     <label>FPS</label>

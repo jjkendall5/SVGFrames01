@@ -18,6 +18,10 @@ const state = {
     isDrawing: false,
     currentPath: null,
     currentPoints: [],
+    startPoint: null, // Store first point for shift-constrained drawing
+    shiftPressed: false, // Track shift key state
+    altPressed: false, // Track alt/option key for forcing circle mode
+    constraintMode: false, // Toggle for touch devices (replaces shift)
     tool: 'pen',
     strokeSize: 2,
     strokeColor: '#000000',
@@ -74,6 +78,28 @@ function fixIOSViewportHeight() {
     });
 }
 
+// Update constraint button UI to show current mode
+function updateConstraintButtonUI() {
+    const btn = document.getElementById('constraintToggle');
+    if (!btn) return;
+    
+    // Remove all states
+    btn.classList.remove('active', 'circle-mode');
+    
+    if (state.altPressed) {
+        // Circle mode (Shift+Alt equivalent)
+        btn.classList.add('active', 'circle-mode');
+        btn.title = 'Circle Mode - Perfect Circles Only (Long Press to Toggle)';
+    } else if (state.constraintMode) {
+        // Regular constraint mode (lines + auto-circle detection)
+        btn.classList.add('active');
+        btn.title = 'Constraint Mode - Straight Lines & Circles (Long Press for Circle Mode)';
+    } else {
+        // Off
+        btn.title = 'Constraint Mode - Straight Lines & Circles (Long Press for Circle Mode)';
+    }
+}
+
 // ==================== EVENT LISTENERS ====================
 function setupEventListeners() {
     // SVG drawing events - Use Pointer Events for mouse, touch, and pen support
@@ -89,6 +115,49 @@ function setupEventListeners() {
     // Tool selection
     document.getElementById('penTool').addEventListener('click', () => selectTool('pen'));
     document.getElementById('eraserTool').addEventListener('click', () => selectTool('eraser'));
+    
+    // Constraint mode toggle with long-press for circle mode
+    const constraintBtn = document.getElementById('constraintToggle');
+    let pressTimer = null;
+    
+    constraintBtn.addEventListener('click', (e) => {
+        // Short click = toggle constraint mode
+        if (!pressTimer) { // Only if not a long press
+            state.constraintMode = !state.constraintMode;
+            state.altPressed = false; // Reset alt mode
+            updateConstraintButtonUI();
+        }
+    });
+    
+    // Long press detection for circle mode (mobile)
+    constraintBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        pressTimer = setTimeout(() => {
+            // Long press = toggle circle mode (Shift+Alt equivalent)
+            state.altPressed = !state.altPressed;
+            state.constraintMode = state.altPressed; // Auto-enable constraint when in circle mode
+            updateConstraintButtonUI();
+            
+            // Haptic feedback if available
+            if (navigator.vibrate) {
+                navigator.vibrate(50);
+            }
+        }, 500); // 500ms = long press
+    });
+    
+    constraintBtn.addEventListener('pointerup', (e) => {
+        if (pressTimer) {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+        }
+    });
+    
+    constraintBtn.addEventListener('pointercancel', (e) => {
+        if (pressTimer) {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+        }
+    });
 
     // Size slider
     document.getElementById('sizeSlider').addEventListener('input', (e) => {
@@ -168,9 +237,8 @@ function setupEventListeners() {
     document.getElementById('duplicateFrameBtn').addEventListener('click', duplicateFrame);
     document.getElementById('deleteFrameBtn').addEventListener('click', deleteFrame);
 
-    // Playback controls - simplified for mobile reliability
+    // Playback controls - single Play/Stop toggle button
     const playBtn = document.getElementById('playBtn');
-    const stopBtn = document.getElementById('stopBtn');
     
     // Remove any pointer capture issues by using touch-action CSS and preventDefault
     playBtn.addEventListener('click', (e) => {
@@ -178,17 +246,6 @@ function setupEventListeners() {
         e.stopPropagation();
         togglePlayback();
     }, { passive: false });
-    
-    // Stop button - multiple event types for maximum reliability on mobile
-    const stopHandler = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log('Stop button triggered via:', e.type);
-        stopPlayback();
-    };
-    
-    stopBtn.addEventListener('click', stopHandler, { passive: false });
-    stopBtn.addEventListener('touchstart', stopHandler, { passive: false }); // Mobile backup
     
     // Failsafe: Double-tap anywhere on timeline controls to stop playback
     let lastTimelineTap = 0;
@@ -237,6 +294,75 @@ function setupEventListeners() {
 // ==================== KEYBOARD SHORTCUTS ====================
 function setupKeyboardShortcuts() {
     document.addEventListener('keydown', handleKeyboardShortcut);
+    
+    // Track shift key for constrained drawing
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Shift') {
+            state.shiftPressed = true;
+            
+            // Visual feedback on constraint button
+            const constraintBtn = document.getElementById('constraintToggle');
+            if (constraintBtn && !state.constraintMode) {
+                constraintBtn.style.opacity = '0.5';
+                constraintBtn.style.transform = 'scale(0.95)';
+            }
+            
+            // Redraw if currently drawing to show constraint
+            if (state.isDrawing && state.currentPath) {
+                const lastEvent = state.lastPointerEvent;
+                if (lastEvent) {
+                    draw(lastEvent);
+                }
+            }
+        }
+        
+        // Track Alt/Option key for forcing circle mode
+        if (e.key === 'Alt') {
+            state.altPressed = true;
+            
+            // Redraw if currently drawing
+            if (state.isDrawing && state.currentPath) {
+                const lastEvent = state.lastPointerEvent;
+                if (lastEvent) {
+                    draw(lastEvent);
+                }
+            }
+        }
+    });
+    
+    document.addEventListener('keyup', (e) => {
+        if (e.key === 'Shift') {
+            state.shiftPressed = false;
+            
+            // Remove visual feedback
+            const constraintBtn = document.getElementById('constraintToggle');
+            if (constraintBtn && !state.constraintMode) {
+                constraintBtn.style.opacity = '';
+                constraintBtn.style.transform = '';
+            }
+            
+            // Redraw if currently drawing to remove constraint
+            if (state.isDrawing && state.currentPath) {
+                const lastEvent = state.lastPointerEvent;
+                if (lastEvent) {
+                    draw(lastEvent);
+                }
+            }
+        }
+        
+        // Release Alt key
+        if (e.key === 'Alt') {
+            state.altPressed = false;
+            
+            // Redraw if currently drawing
+            if (state.isDrawing && state.currentPath) {
+                const lastEvent = state.lastPointerEvent;
+                if (lastEvent) {
+                    draw(lastEvent);
+                }
+            }
+        }
+    });
 }
 
 function handleKeyboardShortcut(e) {
@@ -420,6 +546,50 @@ function updateMaxFrames() {
     state.maxFrames = Math.max(...state.layers.map(l => l.frames.length), 1);
 }
 
+// Apply shift-key constraints for straight lines and circles
+function applyShiftConstraint(startPoint, currentPoint) {
+    const dx = currentPoint.x - startPoint.x;
+    const dy = currentPoint.y - startPoint.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx);
+    
+    // Determine if user wants a circle or a line
+    const width = Math.abs(dx);
+    const height = Math.abs(dy);
+    
+    // Calculate aspect ratio (how square-like is the bounding box)
+    const aspectRatio = Math.min(width, height) / Math.max(width, height);
+    
+    // Alt key forces circle mode (Shift+Alt = always circle)
+    const forceCircle = state.altPressed;
+    
+    // Circle detection criteria (stricter than before):
+    // 1. Aspect ratio > 0.85 (very square-like) OR Alt key pressed
+    // 2. Both dimensions > 50px (substantial size)
+    const isVerySquare = aspectRatio > 0.85;
+    const isLargeEnough = width > 50 && height > 50;
+    
+    if ((isVerySquare && isLargeEnough) || forceCircle) {
+        // CIRCLE MODE: Make it a perfect square (for drawing circles)
+        // Use the larger dimension to create a perfect square bounding box
+        const size = Math.max(width, height);
+        
+        return {
+            x: startPoint.x + (dx > 0 ? size : -size),
+            y: startPoint.y + (dy > 0 ? size : -size)
+        };
+    } else {
+        // LINE MODE: Snap to nearest 45-degree angle
+        // Snap to 8 directions (0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°)
+        const snapAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+        
+        return {
+            x: startPoint.x + distance * Math.cos(snapAngle),
+            y: startPoint.y + distance * Math.sin(snapAngle)
+        };
+    }
+}
+
 // ==================== DRAWING FUNCTIONS ====================
 function startDrawing(e) {
     // Prevent default touch behaviors (scrolling, zooming, etc.)
@@ -447,6 +617,8 @@ function startDrawing(e) {
     
     const point = getSvgPoint(e);
     state.currentPoints.push(point);
+    state.startPoint = point; // Store starting point for shift-constrained drawing
+    state.lastPointerEvent = e; // Store event for shift key updates
     
     // Create new path element
     state.currentPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -488,12 +660,23 @@ function draw(e) {
     
     if (!state.isDrawing || !state.currentPath) return;
     
-    const point = getSvgPoint(e);
+    // Store event for shift key updates
+    state.lastPointerEvent = e;
+    
+    let point = getSvgPoint(e);
+    
+    // Apply shift constraints for straight lines and circles
+    // Works with either keyboard Shift OR constraint mode toggle button
+    const isConstrained = (state.shiftPressed || state.constraintMode);
+    
+    if (isConstrained && state.startPoint && state.tool === 'pen') {
+        point = applyShiftConstraint(state.startPoint, point);
+    }
     
     // Apply smoothing for pen tool only (not eraser)
     if (state.tool === 'pen') {
-        // Distance-based point filtering
-        if (state.currentPoints.length > 0) {
+        // Distance-based point filtering (skip if constrained)
+        if (!isConstrained && state.currentPoints.length > 0) {
             const lastPoint = state.currentPoints[state.currentPoints.length - 1];
             const distance = Math.sqrt(
                 Math.pow(point.x - lastPoint.x, 2) + 
@@ -507,11 +690,18 @@ function draw(e) {
             }
         }
         
-        // Add the point
-        state.currentPoints.push(point);
+        // For shift-constrained drawing, use only start and end points
+        let pointsToUse;
+        if (isConstrained && state.startPoint) {
+            pointsToUse = [state.startPoint, point];
+        } else {
+            // Add the point
+            state.currentPoints.push(point);
+            pointsToUse = state.currentPoints;
+        }
         
-        // Apply averaging for additional smoothing
-        const smoothedPoints = applyPointAveraging(state.currentPoints, state.smoothing);
+        // Apply averaging for additional smoothing (not for shift-constrained)
+        const smoothedPoints = isConstrained ? pointsToUse : applyPointAveraging(pointsToUse, state.smoothing);
         
         // Dual-mode brush: tapered vs uniform
         if (state.taper > 0) {
@@ -541,11 +731,20 @@ function applyPointAveraging(points, smoothing) {
         return points; // Not enough points or no smoothing needed
     }
     
-    // Higher smoothing = more averaging
-    // Convert smoothing value to window size (1-3 points)
-    const windowSize = Math.min(3, Math.max(1, Math.floor(smoothing / 3)));
+    // Adjust averaging based on smoothing level
+    // Low smoothing (0.5-1.5): minimal averaging
+    // Medium smoothing (3-5): light averaging  
+    // High smoothing (8): moderate averaging
+    let windowSize = 0;
+    if (smoothing <= 1.5) {
+        windowSize = 0; // No averaging, just distance filtering
+    } else if (smoothing <= 5) {
+        windowSize = 1; // Average with 1 neighbor on each side
+    } else {
+        windowSize = 2; // Average with 2 neighbors on each side
+    }
     
-    if (windowSize < 2) {
+    if (windowSize === 0) {
         return points; // No averaging needed
     }
     
@@ -554,23 +753,25 @@ function applyPointAveraging(points, smoothing) {
     // Keep first point as-is
     smoothed.push(points[0]);
     
-    // Average middle points
+    // Average middle points with weighted average (center point has more weight)
     for (let i = 1; i < points.length - 1; i++) {
-        let sumX = 0, sumY = 0, count = 0;
+        let sumX = 0, sumY = 0, totalWeight = 0;
         
-        // Average with neighbors based on window size
+        // Weighted average with neighbors
         const start = Math.max(0, i - windowSize);
         const end = Math.min(points.length - 1, i + windowSize);
         
         for (let j = start; j <= end; j++) {
-            sumX += points[j].x;
-            sumY += points[j].y;
-            count++;
+            // Center point gets more weight for better shape preservation
+            const weight = (j === i) ? 2.0 : 1.0;
+            sumX += points[j].x * weight;
+            sumY += points[j].y * weight;
+            totalWeight += weight;
         }
         
         smoothed.push({
-            x: sumX / count,
-            y: sumY / count
+            x: sumX / totalWeight,
+            y: sumY / totalWeight
         });
     }
     
@@ -734,6 +935,8 @@ function stopDrawing(e) {
     
     state.currentPath = null;
     state.currentPoints = [];
+    state.startPoint = null; // Clear start point
+    state.lastPointerEvent = null; // Clear last event
 }
 
 function getSvgPoint(e) {
@@ -755,29 +958,49 @@ function getSvgPoint(e) {
     return { x, y };
 }
 
-// Convert points array to SVG path data with smoothing
+// Convert points array to SVG path data with smooth cubic Bezier curves
 function pointsToPath(points) {
     if (points.length < 2) {
         return `M ${points[0].x} ${points[0].y}`;
     }
     
-    let path = `M ${points[0].x} ${points[0].y}`;
-    
-    for (let i = 1; i < points.length; i++) {
-        const prev = points[i - 1];
-        const curr = points[i];
-        const midX = (prev.x + curr.x) / 2;
-        const midY = (prev.y + curr.y) / 2;
-        
-        if (i === 1) {
-            path += ` L ${midX} ${midY}`;
-        } else {
-            path += ` Q ${prev.x} ${prev.y} ${midX} ${midY}`;
-        }
+    if (points.length === 2) {
+        return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
     }
     
-    const lastPoint = points[points.length - 1];
-    path += ` L ${lastPoint.x} ${lastPoint.y}`;
+    // Use cubic Bezier curves for smooth drawing with Apple Pencil
+    let path = `M ${points[0].x} ${points[0].y}`;
+    
+    // Generate smooth curve through all points using cubic Bezier
+    for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[Math.max(0, i - 1)];
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        const p3 = points[Math.min(points.length - 1, i + 2)];
+        
+        // Calculate control points for smooth cubic Bezier (Catmull-Rom spline)
+        // Adjust tension based on angle change to prevent overshooting on sharp turns
+        let tension = 0.25; // Base tension (lower = smoother)
+        
+        // Detect sharp turns and reduce tension
+        if (i > 0 && i < points.length - 2) {
+            const angle1 = Math.atan2(p1.y - p0.y, p1.x - p0.x);
+            const angle2 = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+            const angleDiff = Math.abs(angle2 - angle1);
+            
+            // If sharp turn (>45°), reduce tension to prevent corners
+            if (angleDiff > Math.PI / 4) {
+                tension *= 0.5;
+            }
+        }
+        
+        const cp1x = p1.x + (p2.x - p0.x) * tension;
+        const cp1y = p1.y + (p2.y - p0.y) * tension;
+        const cp2x = p2.x - (p3.x - p1.x) * tension;
+        const cp2y = p2.y - (p3.y - p1.y) * tension;
+        
+        path += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+    }
     
     return path;
 }
@@ -1279,19 +1502,13 @@ function startPlayback() {
     // Update state immediately
     state.isPlaying = true;
     
-    // Update Play button UI
+    // Update Play button to Stop icon
     const playBtn = document.getElementById('playBtn');
     if (playBtn) {
         const iconEl = playBtn.querySelector('.icon');
-        if (iconEl) iconEl.textContent = '⏸';
-        playBtn.title = 'Pause';
+        if (iconEl) iconEl.textContent = '⏹'; // Stop icon
+        playBtn.title = 'Stop';
         playBtn.classList.add('playing');
-    }
-    
-    // Update Stop button UI (make it prominent when playing)
-    const stopBtn = document.getElementById('stopBtn');
-    if (stopBtn) {
-        stopBtn.classList.add('active');
     }
     
     const frameDelay = Math.max(1000 / state.fps, 16); // Minimum 16ms (60fps cap)
@@ -1353,19 +1570,13 @@ function stopPlayback() {
         state.playInterval = null;
     }
     
-    // Update Play button UI
+    // Update button to Play icon
     const playBtn = document.getElementById('playBtn');
     if (playBtn) {
         const iconEl = playBtn.querySelector('.icon');
-        if (iconEl) iconEl.textContent = '▶';
+        if (iconEl) iconEl.textContent = '▶'; // Play icon
         playBtn.title = 'Play';
         playBtn.classList.remove('playing');
-    }
-    
-    // Update Stop button UI
-    const stopBtn = document.getElementById('stopBtn');
-    if (stopBtn) {
-        stopBtn.classList.remove('active');
     }
     
     // Force a final render to ensure UI is in sync

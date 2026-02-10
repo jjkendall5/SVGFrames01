@@ -248,6 +248,18 @@ body {
     color: var(--accent);
 }
 
+.constraint-btn.active {
+    background: #dbeafe;
+    color: #2563eb;
+    border: 2px solid #2563eb;
+}
+
+.constraint-btn.circle-mode {
+    background: #fef3c7;
+    color: #f59e0b;
+    border: 2px solid #f59e0b;
+}
+
 .tool-label {
     font-size: 10px;
     font-weight: 500;
@@ -663,22 +675,10 @@ body {
     background: var(--accent-bg);
 }
 
-/* Playing state - make Play button obvious it's active */
+/* Playing state - make button obvious it's active */
 .timeline-btn.playing {
     background: var(--accent-bg);
     color: var(--accent);
-}
-
-/* Stop button active state - make it prominent when playing */
-#stopBtn.active {
-    background: #fee2e2; /* Light red background */
-    color: #dc2626; /* Red text */
-    border: 1px solid #fca5a5; /* Red border */
-}
-
-#stopBtn.active:hover {
-    background: #fecaca;
-    color: #b91c1c;
 }
 
 .fps-input {
@@ -1345,9 +1345,8 @@ input:focus:not(:focus-visible) {
         min-height: 44px; /* Easier to tap */
     }
     
-    /* Larger tap areas for important controls */
-    #playBtn,
-    #stopBtn {
+    /* Larger tap area for playback control */
+    #playBtn {
         min-width: 48px;
         min-height: 44px;
     }
