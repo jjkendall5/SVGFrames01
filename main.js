@@ -36,6 +36,9 @@ const state = {
 
 // ==================== INITIALIZATION ====================
 function init() {
+    // Fix iOS Safari viewport height issue
+    fixIOSViewportHeight();
+    
     setupEventListeners();
     setupKeyboardShortcuts();
     loadFromLocalStorage();
@@ -44,10 +47,31 @@ function init() {
     updateSmoothingLabel(); // Set initial smoothing label
     updateSizeValue(); // Set initial size value
     updateTaperValue(); // Set initial taper value
+    updateCanvasSizeSelector(state.canvasWidth, state.canvasHeight); // Set initial canvas size
     renderFrame();
     updateLayerList();
     updateFrameList();
     updateFrameCounter();
+}
+
+// Fix iOS Safari viewport height (URL bar causes issues with 100vh)
+function fixIOSViewportHeight() {
+    // Set CSS variable for actual viewport height
+    const setViewportHeight = () => {
+        const vh = window.innerHeight * 0.01;
+        document.documentElement.style.setProperty('--vh', `${vh}px`);
+    };
+    
+    // Set on load
+    setViewportHeight();
+    
+    // Update on resize (when URL bar shows/hides)
+    window.addEventListener('resize', setViewportHeight);
+    
+    // Update on orientation change
+    window.addEventListener('orientationchange', () => {
+        setTimeout(setViewportHeight, 100); // Delay for orientation to complete
+    });
 }
 
 // ==================== EVENT LISTENERS ====================
@@ -96,8 +120,7 @@ function setupEventListeners() {
         if (value === 'custom') {
             // Show custom size dialog
             showCanvasSizeDialog();
-            // Reset selector to current size
-            e.target.value = `${state.canvasWidth}x${state.canvasHeight}`;
+            // Note: Don't reset here - updateCanvasSize will handle it after dialog confirms
         } else {
             // Preset size
             const [width, height] = value.split('x').map(Number);
@@ -145,34 +168,53 @@ function setupEventListeners() {
     document.getElementById('duplicateFrameBtn').addEventListener('click', duplicateFrame);
     document.getElementById('deleteFrameBtn').addEventListener('click', deleteFrame);
 
-    // Playback controls - use both click and pointerup for reliability
+    // Playback controls - simplified for mobile reliability
     const playBtn = document.getElementById('playBtn');
     const stopBtn = document.getElementById('stopBtn');
     
-    // Ensure buttons work on all devices by handling both click and pointer events
+    // Remove any pointer capture issues by using touch-action CSS and preventDefault
     playBtn.addEventListener('click', (e) => {
-        e.stopPropagation(); // Prevent event from bubbling
+        e.preventDefault();
+        e.stopPropagation();
         togglePlayback();
-    });
+    }, { passive: false });
     
-    playBtn.addEventListener('pointerdown', (e) => {
-        e.stopPropagation(); // Prevent canvas from capturing
-    });
-    
-    stopBtn.addEventListener('click', (e) => {
+    // Stop button - multiple event types for maximum reliability on mobile
+    const stopHandler = (e) => {
+        e.preventDefault();
         e.stopPropagation();
+        console.log('Stop button triggered via:', e.type);
         stopPlayback();
-    });
+    };
     
-    stopBtn.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-    });
+    stopBtn.addEventListener('click', stopHandler, { passive: false });
+    stopBtn.addEventListener('touchstart', stopHandler, { passive: false }); // Mobile backup
+    
+    // Failsafe: Double-tap anywhere on timeline controls to stop playback
+    let lastTimelineTap = 0;
+    const timelineControls = document.querySelector('.timeline-controls');
+    if (timelineControls) {
+        timelineControls.addEventListener('touchstart', (e) => {
+            const now = Date.now();
+            const timeSinceLastTap = now - lastTimelineTap;
+            
+            if (timeSinceLastTap < 300 && timeSinceLastTap > 0) {
+                // Double-tap detected
+                if (state.isPlaying) {
+                    console.log('Double-tap stop detected');
+                    stopPlayback();
+                }
+            }
+            
+            lastTimelineTap = now;
+        }, { passive: true });
+    }
     
     document.getElementById('fpsSelect').addEventListener('change', (e) => {
         state.fps = parseInt(e.target.value) || 12;
         if (state.isPlaying) {
             stopPlayback();
-            togglePlayback();
+            startPlayback(); // Use startPlayback directly instead of toggle
         }
     });
 
@@ -201,6 +243,34 @@ function handleKeyboardShortcut(e) {
     // Don't trigger shortcuts when typing in input fields
     const activeElement = document.activeElement;
     if (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA') {
+        return;
+    }
+    
+    // Escape key - stop playback (emergency stop)
+    if (e.key === 'Escape') {
+        if (state.isPlaying) {
+            e.preventDefault();
+            stopPlayback();
+            return;
+        }
+    }
+    
+    // Spacebar - toggle playback
+    if (e.key === ' ') {
+        e.preventDefault();
+        togglePlayback();
+        return;
+    }
+    
+    // O key - toggle onion skin
+    if (e.key === 'o' || e.key === 'O') {
+        e.preventDefault();
+        const onionToggle = document.getElementById('onionSkinToggle');
+        if (onionToggle) {
+            state.onionSkinEnabled = !state.onionSkinEnabled;
+            onionToggle.classList.toggle('active', state.onionSkinEnabled);
+            renderFrame();
+        }
         return;
     }
     
@@ -852,6 +922,13 @@ function showCanvasSizeDialog() {
     // Show both buttons
     document.getElementById('modalCancelBtn').style.display = 'block';
     document.getElementById('modalConfirmBtn').textContent = 'Apply';
+    
+    // Override cancel button to reset selector
+    document.getElementById('modalCancelBtn').onclick = () => {
+        closeModal();
+        // Reset selector to current size
+        updateCanvasSizeSelector(state.canvasWidth, state.canvasHeight);
+    };
 }
 
 // Update canvas size
@@ -871,11 +948,52 @@ function updateCanvasSize(width, height) {
         bgRect.setAttribute('height', '100%');
     }
     
+    // Update selector to show current size
+    updateCanvasSizeSelector(width, height);
+    
     // Re-render current frame
     renderFrame();
     
     // Save to localStorage
     saveToLocalStorage();
+}
+
+function updateCanvasSizeSelector(width, height) {
+    const selector = document.getElementById('canvasSizeSelect');
+    if (!selector) return;
+    
+    const sizeValue = `${width}x${height}`;
+    
+    // Check if this size already exists as an option
+    let optionExists = false;
+    for (let option of selector.options) {
+        if (option.value === sizeValue) {
+            optionExists = true;
+            break;
+        }
+    }
+    
+    // If custom size, add it to the dropdown
+    if (!optionExists) {
+        // Remove any existing custom size option (not the preset ones)
+        const existingCustom = selector.querySelector('option[data-custom="true"]');
+        if (existingCustom) {
+            existingCustom.remove();
+        }
+        
+        // Create new custom option
+        const customOption = document.createElement('option');
+        customOption.value = sizeValue;
+        customOption.textContent = `${width}×${height}`;
+        customOption.setAttribute('data-custom', 'true');
+        
+        // Insert before the "Custom..." option
+        const customMenuItem = selector.querySelector('option[value="custom"]');
+        selector.insertBefore(customOption, customMenuItem);
+    }
+    
+    // Select the current size
+    selector.value = sizeValue;
 }
 
 // ==================== RENDERING ====================
@@ -1147,64 +1265,117 @@ function togglePlayback() {
 }
 
 function startPlayback() {
-    // Stop any existing playback first
-    if (state.playInterval) {
-        clearInterval(state.playInterval);
-        state.playInterval = null;
+    console.log('startPlayback called'); // Debug log
+    
+    // Safety: Stop any existing playback first
+    stopPlayback();
+    
+    // Check if we have frames to play
+    if (state.maxFrames <= 1) {
+        console.log('Not enough frames to play');
+        return;
     }
     
     // Update state immediately
     state.isPlaying = true;
     
-    // Update UI - icon only
+    // Update Play button UI
     const playBtn = document.getElementById('playBtn');
     if (playBtn) {
         const iconEl = playBtn.querySelector('.icon');
         if (iconEl) iconEl.textContent = '⏸';
         playBtn.title = 'Pause';
+        playBtn.classList.add('playing');
     }
     
-    const frameDelay = 1000 / state.fps;
+    // Update Stop button UI (make it prominent when playing)
+    const stopBtn = document.getElementById('stopBtn');
+    if (stopBtn) {
+        stopBtn.classList.add('active');
+    }
     
-    state.playInterval = setInterval(() => {
-        // Double-check we're still supposed to be playing
+    const frameDelay = Math.max(1000 / state.fps, 16); // Minimum 16ms (60fps cap)
+    
+    // Use requestAnimationFrame for smoother playback on mobile
+    let lastFrameTime = Date.now();
+    
+    const playbackLoop = () => {
+        // Critical: Check if we should still be playing
         if (!state.isPlaying) {
-            clearInterval(state.playInterval);
-            state.playInterval = null;
+            console.log('Playback stopped in loop');
+            if (state.playInterval) {
+                cancelAnimationFrame(state.playInterval);
+                state.playInterval = null;
+            }
             return;
         }
         
-        // Play through max frames across all layers
-        state.currentFrameIndex = (state.currentFrameIndex + 1) % state.maxFrames;
+        const now = Date.now();
+        const elapsed = now - lastFrameTime;
         
-        renderFrame();
-        updateFrameList();
-        updateFrameCounter();
-    }, frameDelay);
+        // Only advance frame if enough time has passed
+        if (elapsed >= frameDelay) {
+            lastFrameTime = now;
+            
+            // Advance frame
+            state.currentFrameIndex = (state.currentFrameIndex + 1) % state.maxFrames;
+            
+            // Update display
+            try {
+                renderFrame();
+                updateFrameList();
+                updateFrameCounter();
+            } catch (err) {
+                console.error('Playback render error:', err);
+                stopPlayback();
+                return;
+            }
+        }
+        
+        // Continue loop
+        state.playInterval = requestAnimationFrame(playbackLoop);
+    };
+    
+    // Start the loop
+    state.playInterval = requestAnimationFrame(playbackLoop);
+    console.log('Playback loop started');
 }
 
 function stopPlayback() {
+    console.log('stopPlayback called'); // Debug log
+    
     // Update state immediately - this is critical for button responsiveness
     state.isPlaying = false;
     
-    // Clear interval if it exists
+    // Clear interval/animation frame if it exists
     if (state.playInterval) {
-        clearInterval(state.playInterval);
+        cancelAnimationFrame(state.playInterval);
         state.playInterval = null;
     }
     
-    // Update UI - icon only
+    // Update Play button UI
     const playBtn = document.getElementById('playBtn');
     if (playBtn) {
         const iconEl = playBtn.querySelector('.icon');
         if (iconEl) iconEl.textContent = '▶';
         playBtn.title = 'Play';
+        playBtn.classList.remove('playing');
+    }
+    
+    // Update Stop button UI
+    const stopBtn = document.getElementById('stopBtn');
+    if (stopBtn) {
+        stopBtn.classList.remove('active');
     }
     
     // Force a final render to ensure UI is in sync
-    renderFrame();
-    updateFrameList();
-    updateFrameCounter();
+    try {
+        renderFrame();
+        updateFrameList();
+        updateFrameCounter();
+    } catch (err) {
+        console.error('Stop playback render error:', err);
+    }
 }
 
 // ==================== UNDO/REDO ====================
