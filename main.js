@@ -31,6 +31,14 @@ const state = {
     canvasWidth: 600, // Canvas width
     canvasHeight: 600, // Canvas height
     onionSkinEnabled: true,
+    onionSkinSettings: {
+        framesBefore: 1,
+        framesAfter: 1,
+        beforeOpacity: 30,
+        afterOpacity: 30,
+        beforeColor: '#ff6b6b',
+        afterColor: '#4dabf7'
+    },
     isPlaying: false,
     playInterval: null,
     fps: 12,
@@ -43,6 +51,9 @@ function init() {
     // Fix iOS Safari viewport height issue
     fixIOSViewportHeight();
     
+    // Start playback watchdog (checks for stuck states every second)
+    startPlaybackWatchdog();
+    
     setupEventListeners();
     setupKeyboardShortcuts();
     loadFromLocalStorage();
@@ -52,10 +63,40 @@ function init() {
     updateSizeValue(); // Set initial size value
     updateTaperValue(); // Set initial taper value
     updateCanvasSizeSelector(state.canvasWidth, state.canvasHeight); // Set initial canvas size
+    
+    // Sync onion skin button with state
+    const onionToggle = document.getElementById('onionSkinToggle');
+    if (onionToggle) {
+        onionToggle.classList.toggle('active', state.onionSkinEnabled);
+    }
+    
     renderFrame();
     updateLayerList();
     updateFrameList();
     updateFrameCounter();
+}
+
+// Watchdog timer to detect and fix stuck playback states (iPad Safari bug workaround)
+function startPlaybackWatchdog() {
+    setInterval(() => {
+        const playBtn = document.getElementById('playBtn');
+        if (!playBtn) return;
+        
+        const iconEl = playBtn.querySelector('.icon');
+        const iconText = iconEl ? iconEl.textContent : '';
+        
+        // Detect mismatch: button shows stop but state says not playing
+        if (iconText === '⏹' && !state.isPlaying) {
+            console.error('WATCHDOG: Detected stuck playback state! Auto-fixing...');
+            stopPlayback();
+        }
+        
+        // Detect mismatch: button shows play but state says playing
+        if (iconText === '▶' && state.isPlaying) {
+            console.error('WATCHDOG: Detected stuck playing state! Auto-fixing...');
+            stopPlayback();
+        }
+    }, 1000); // Check every second
 }
 
 // Fix iOS Safari viewport height (URL bar causes issues with 100vh)
@@ -197,17 +238,6 @@ function setupEventListeners() {
         }
     });
 
-    // Onion skin toggle
-    const onionToggle = document.getElementById('onionSkinToggle');
-    onionToggle.addEventListener('click', () => {
-        state.onionSkinEnabled = !state.onionSkinEnabled;
-        onionToggle.classList.toggle('active', state.onionSkinEnabled);
-        renderFrame();
-    });
-    if (state.onionSkinEnabled) {
-        onionToggle.classList.add('active');
-    }
-
     // Background color picker
     document.getElementById('backgroundColorPicker').addEventListener('change', (e) => {
         state.backgroundColor = e.target.value;
@@ -237,14 +267,124 @@ function setupEventListeners() {
     document.getElementById('duplicateFrameBtn').addEventListener('click', duplicateFrame);
     document.getElementById('deleteFrameBtn').addEventListener('click', deleteFrame);
 
+    // Onion skin toggle
+    const onionToggleBtn = document.getElementById('onionSkinToggle');
+    onionToggleBtn.addEventListener('click', function() {
+        // Toggle state
+        state.onionSkinEnabled = !state.onionSkinEnabled;
+        
+        console.log('Toggled onion skin to:', state.onionSkinEnabled);
+        
+        // Update button appearance
+        if (state.onionSkinEnabled) {
+            onionToggleBtn.classList.add('active');
+        } else {
+            onionToggleBtn.classList.remove('active');
+        }
+        
+        // Re-render and save
+        renderFrame();
+        saveToLocalStorage();
+    });
+    
+    // Onion skin settings panel toggle
+    document.getElementById('onionSkinSettings').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const panel = document.getElementById('onionSkinPanel');
+        const isVisible = panel.style.display !== 'none';
+        panel.style.display = isVisible ? 'none' : 'block';
+        document.getElementById('onionSkinSettings').classList.toggle('active', !isVisible);
+    });
+    
+    // Close panel when clicking outside
+    document.addEventListener('click', (e) => {
+        const panel = document.getElementById('onionSkinPanel');
+        const settingsBtn = document.getElementById('onionSkinSettings');
+        
+        if (panel.style.display === 'block' && 
+            !panel.contains(e.target) && 
+            !settingsBtn.contains(e.target)) {
+            panel.style.display = 'none';
+            settingsBtn.classList.remove('active');
+        }
+    });
+    
+    // Onion skin settings inputs
+    document.getElementById('onionBefore').addEventListener('input', (e) => {
+        state.onionSkinSettings.framesBefore = parseInt(e.target.value);
+        renderFrame();
+    });
+    
+    document.getElementById('onionAfter').addEventListener('input', (e) => {
+        state.onionSkinSettings.framesAfter = parseInt(e.target.value);
+        renderFrame();
+    });
+    
+    document.getElementById('onionBeforeOpacity').addEventListener('input', (e) => {
+        state.onionSkinSettings.beforeOpacity = parseInt(e.target.value);
+        e.target.nextElementSibling.textContent = `${e.target.value}%`;
+        renderFrame();
+    });
+    
+    document.getElementById('onionAfterOpacity').addEventListener('input', (e) => {
+        state.onionSkinSettings.afterOpacity = parseInt(e.target.value);
+        e.target.nextElementSibling.textContent = `${e.target.value}%`;
+        renderFrame();
+    });
+    
+    document.getElementById('onionBeforeColor').addEventListener('input', (e) => {
+        state.onionSkinSettings.beforeColor = e.target.value;
+        renderFrame();
+    });
+    
+    document.getElementById('onionAfterColor').addEventListener('input', (e) => {
+        state.onionSkinSettings.afterColor = e.target.value;
+        renderFrame();
+    });
+
     // Playback controls - single Play/Stop toggle button
     const playBtn = document.getElementById('playBtn');
     
-    // Remove any pointer capture issues by using touch-action CSS and preventDefault
+    // Ultra-defensive event handling for iPad
     playBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        e.stopImmediatePropagation(); // Stop ALL handlers
+        
+        console.log('Play button clicked, current state.isPlaying:', state.isPlaying);
+        
+        // Force check button state vs internal state (iPad Safari bug workaround)
+        const iconEl = playBtn.querySelector('.icon');
+        const iconText = iconEl ? iconEl.textContent : '';
+        
+        // If button shows stop icon (⏹) but state says not playing, force stop
+        if (iconText === '⏹' && !state.isPlaying) {
+            console.warn('Button/state mismatch detected! Forcing stop.');
+            stopPlayback();
+            return;
+        }
+        
+        // Normal toggle
         togglePlayback();
+        
+    }, { passive: false, capture: true }); // Capture phase + non-passive
+    
+    // Additional safety: touchend event (iPad sometimes misses click)
+    playBtn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Small delay to prevent double-trigger with click
+        setTimeout(() => {
+            const iconEl = playBtn.querySelector('.icon');
+            const iconText = iconEl ? iconEl.textContent : '';
+            
+            // Check for stuck state
+            if (iconText === '⏹' && !state.isPlaying) {
+                console.warn('Stuck state detected on touchend! Forcing stop.');
+                stopPlayback();
+            }
+        }, 50);
     }, { passive: false });
     
     // Failsafe: Double-tap anywhere on timeline controls to stop playback
@@ -445,6 +585,38 @@ function addLayer() {
     saveToLocalStorage();
 }
 
+function moveLayerUp(layerId) {
+    const index = state.layers.findIndex(l => l.id === layerId);
+    
+    // Can't move beyond the end (which renders on top)
+    if (index === state.layers.length - 1) return;
+    
+    // Swap with next layer (moves forward in render order = up in visual list)
+    const temp = state.layers[index];
+    state.layers[index] = state.layers[index + 1];
+    state.layers[index + 1] = temp;
+    
+    updateLayerList();
+    renderFrame();
+    saveToLocalStorage();
+}
+
+function moveLayerDown(layerId) {
+    const index = state.layers.findIndex(l => l.id === layerId);
+    
+    // Can't move beyond the beginning (which renders on bottom)
+    if (index === 0) return;
+    
+    // Swap with previous layer (moves backward in render order = down in visual list)
+    const temp = state.layers[index];
+    state.layers[index] = state.layers[index - 1];
+    state.layers[index - 1] = temp;
+    
+    updateLayerList();
+    renderFrame();
+    saveToLocalStorage();
+}
+
 function deleteLayer() {
     if (state.layers.length === 1) {
         showAlert('Cannot delete the only layer!', 'Error');
@@ -488,12 +660,34 @@ function toggleLayerVisibility(layerId) {
     }
 }
 
+function toggleBackgroundLayer(layerId, isBackground) {
+    const layer = state.layers.find(l => l.id === layerId);
+    if (!layer) return;
+    
+    layer.isBackground = isBackground;
+    
+    if (isBackground) {
+        // Ensure layer has at least one frame
+        if (layer.frames.length === 0) {
+            layer.frames.push({ paths: [] });
+        }
+        
+        // Don't auto-extend here - will happen in renderFrame
+    }
+    
+    updateMaxFrames();
+    updateLayerList();
+    renderFrame();
+    saveToLocalStorage();
+}
+
 function updateLayerList() {
     const layerList = document.getElementById('layerList');
     layerList.innerHTML = '';
     
     // Render layers in reverse order (top layer first in UI)
-    [...state.layers].reverse().forEach(layer => {
+    const reversedLayers = [...state.layers].reverse();
+    reversedLayers.forEach((layer, reversedIndex) => {
         const layerItem = document.createElement('div');
         layerItem.className = 'layer-item';
         if (layer.id === state.currentLayerId) {
@@ -510,15 +704,72 @@ function updateLayerList() {
             updateLayerList();
         });
         
+        // Layer reorder buttons (up/down arrows)
+        const reorderControls = document.createElement('div');
+        reorderControls.className = 'layer-reorder';
+        
+        // Up arrow (move layer up in visual list = move forward in render order)
+        const upBtn = document.createElement('button');
+        upBtn.className = 'layer-arrow-btn';
+        upBtn.innerHTML = '▲';
+        upBtn.title = 'Move layer up';
+        upBtn.disabled = reversedIndex === 0; // Can't move top layer up
+        upBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            moveLayerUp(layer.id);
+        });
+        
+        // Down arrow (move layer down in visual list = move backward in render order)
+        const downBtn = document.createElement('button');
+        downBtn.className = 'layer-arrow-btn';
+        downBtn.innerHTML = '▼';
+        downBtn.title = 'Move layer down';
+        downBtn.disabled = reversedIndex === reversedLayers.length - 1; // Can't move bottom layer down
+        downBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            moveLayerDown(layer.id);
+        });
+        
+        reorderControls.appendChild(upBtn);
+        reorderControls.appendChild(downBtn);
+        
         // Layer name
         const nameSpan = document.createElement('span');
         nameSpan.className = 'layer-name';
         nameSpan.textContent = layer.name;
         
-        // Frame count (compact)
+        // BG checkbox
+        const bgLabel = document.createElement('label');
+        bgLabel.className = 'bg-layer-label';
+        bgLabel.title = 'Background Layer (extends to full animation length)';
+        bgLabel.addEventListener('click', (e) => e.stopPropagation());
+        
+        const bgText = document.createElement('span');
+        bgText.className = 'bg-text';
+        bgText.textContent = 'BG';
+        
+        const bgCheckbox = document.createElement('input');
+        bgCheckbox.type = 'checkbox';
+        bgCheckbox.className = 'bg-checkbox';
+        bgCheckbox.checked = layer.isBackground || false;
+        bgCheckbox.addEventListener('change', (e) => {
+            e.stopPropagation();
+            toggleBackgroundLayer(layer.id, e.target.checked);
+        });
+        
+        bgLabel.appendChild(bgText);
+        bgLabel.appendChild(bgCheckbox);
+        
+        // Frame count (compact) - show "BG" for background layers
         const frameCount = document.createElement('span');
         frameCount.className = 'layer-frame-count';
-        frameCount.textContent = layer.frames.length;
+        if (layer.isBackground) {
+            frameCount.textContent = 'BG';
+            frameCount.style.color = 'var(--accent)';
+            frameCount.style.fontWeight = '700';
+        } else {
+            frameCount.textContent = layer.frames.length;
+        }
         
         // Delete button
         const deleteBtn = document.createElement('button');
@@ -533,7 +784,9 @@ function updateLayerList() {
         });
         
         layerItem.appendChild(checkbox);
+        layerItem.appendChild(reorderControls);
         layerItem.appendChild(nameSpan);
+        layerItem.appendChild(bgLabel);
         layerItem.appendChild(frameCount);
         layerItem.appendChild(deleteBtn);
         
@@ -600,10 +853,13 @@ function startDrawing(e) {
     const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
     if (!currentLayer || !currentLayer.visible) return;
     
-    // Make sure current layer has a frame at current index
-    if (!currentLayer.frames[state.currentFrameIndex]) {
-        // Extend layer's frames to current index
-        while (currentLayer.frames.length <= state.currentFrameIndex) {
+    // Determine which frame to draw on
+    const drawFrameIndex = currentLayer.isBackground ? 0 : state.currentFrameIndex;
+    
+    // Make sure current layer has a frame at the target index
+    if (!currentLayer.frames[drawFrameIndex]) {
+        // Extend layer's frames to target index
+        while (currentLayer.frames.length <= drawFrameIndex) {
             currentLayer.frames.push({ paths: [] });
         }
         updateMaxFrames();
@@ -913,7 +1169,10 @@ function stopDrawing(e) {
     if (state.currentPath && state.currentPoints.length > 0) {
         const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
         
-        if (currentLayer && currentLayer.frames[state.currentFrameIndex]) {
+        // Determine which frame to save to (frame 0 for BG layers, current frame otherwise)
+        const saveFrameIndex = currentLayer && currentLayer.isBackground ? 0 : state.currentFrameIndex;
+        
+        if (currentLayer && currentLayer.frames[saveFrameIndex]) {
             // Store the path data (with fill for tapered strokes)
             const pathData = {
                 d: state.currentPath.getAttribute('d'),
@@ -923,7 +1182,7 @@ function stopDrawing(e) {
                 tool: state.tool
             };
             
-            currentLayer.frames[state.currentFrameIndex].paths.push(pathData);
+            currentLayer.frames[saveFrameIndex].paths.push(pathData);
             
             // Clear redo stack on new action
             state.redoStack = [];
@@ -1254,16 +1513,80 @@ function renderFrame() {
     // Clear onion skin layer
     onionSkinLayer.innerHTML = '';
     
-    // Draw onion skin (previous frame)
-    if (state.onionSkinEnabled && state.currentFrameIndex > 0) {
-        state.layers.forEach(layer => {
-            if (layer.visible && layer.frames[state.currentFrameIndex - 1]) {
-                layer.frames[state.currentFrameIndex - 1].paths.forEach(pathData => {
-                    const path = createPathElement(pathData);
-                    onionSkinLayer.appendChild(path);
-                });
-            }
-        });
+    // Draw onion skin (multi-frame support with customizable settings)
+    if (state.onionSkinEnabled) {
+        console.log('✓ ONION SKIN IS ON - Drawing ghost frames');
+        const settings = state.onionSkinSettings;
+        
+        // Draw previous frames (multiple)
+        for (let i = 1; i <= settings.framesBefore; i++) {
+            const frameIndex = state.currentFrameIndex - i;
+            if (frameIndex < 0) break; // Stop if we go before frame 0
+            
+            // Calculate opacity fade (further frames are more transparent)
+            const opacityMultiplier = 1 - ((i - 1) / settings.framesBefore) * 0.5;
+            const opacity = (settings.beforeOpacity / 100) * opacityMultiplier;
+            
+            const prevGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            prevGroup.setAttribute('opacity', opacity.toString());
+            prevGroup.setAttribute('class', `onion-prev onion-prev-${i}`);
+            
+            state.layers.forEach(layer => {
+                // Skip background layers in onion skin
+                if (layer.isBackground) return;
+                
+                if (layer.visible && layer.frames[frameIndex]) {
+                    layer.frames[frameIndex].paths.forEach(pathData => {
+                        const path = createPathElement(pathData);
+                        // Apply color tint
+                        if (pathData.fill && pathData.fill !== 'none') {
+                            path.setAttribute('fill', settings.beforeColor);
+                        } else {
+                            path.setAttribute('stroke', settings.beforeColor);
+                        }
+                        prevGroup.appendChild(path);
+                    });
+                }
+            });
+            
+            onionSkinLayer.appendChild(prevGroup);
+        }
+        
+        // Draw next frames (multiple)
+        for (let i = 1; i <= settings.framesAfter; i++) {
+            const frameIndex = state.currentFrameIndex + i;
+            if (frameIndex >= state.maxFrames) break; // Stop if we go beyond last frame
+            
+            // Calculate opacity fade (further frames are more transparent)
+            const opacityMultiplier = 1 - ((i - 1) / settings.framesAfter) * 0.5;
+            const opacity = (settings.afterOpacity / 100) * opacityMultiplier;
+            
+            const nextGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            nextGroup.setAttribute('opacity', opacity.toString());
+            nextGroup.setAttribute('class', `onion-next onion-next-${i}`);
+            
+            state.layers.forEach(layer => {
+                // Skip background layers in onion skin
+                if (layer.isBackground) return;
+                
+                if (layer.visible && layer.frames[frameIndex]) {
+                    layer.frames[frameIndex].paths.forEach(pathData => {
+                        const path = createPathElement(pathData);
+                        // Apply color tint
+                        if (pathData.fill && pathData.fill !== 'none') {
+                            path.setAttribute('fill', settings.afterColor);
+                        } else {
+                            path.setAttribute('stroke', settings.afterColor);
+                        }
+                        nextGroup.appendChild(path);
+                    });
+                }
+            });
+            
+            onionSkinLayer.appendChild(nextGroup);
+        }
+    } else {
+        console.log('✗ ONION SKIN IS OFF - No ghost frames');
     }
     
     // Draw current frame - composite all layers at current frame index
@@ -1275,10 +1598,27 @@ function renderFrame() {
             layerGroup.setAttribute('opacity', '0');
         }
         
-        // Draw frame at current index if it exists
-        if (layer.frames[state.currentFrameIndex]) {
-            console.log(`Layer ${layer.id} at frame ${state.currentFrameIndex}: ${layer.frames[state.currentFrameIndex].paths.length} paths`);
-            layer.frames[state.currentFrameIndex].paths.forEach(pathData => {
+        // Get the frame to render
+        let frameToRender = null;
+        
+        // Background layers always show their first frame
+        if (layer.isBackground) {
+            frameToRender = layer.frames[0];
+        } else {
+            // Normal layers: handle held frames and current frame
+            frameToRender = layer.frames[state.currentFrameIndex];
+            
+            // If this frame is a hold reference, get the original frame
+            if (frameToRender && frameToRender.holdReference !== undefined) {
+                const originalFrameIndex = frameToRender.holdReference;
+                frameToRender = layer.frames[originalFrameIndex];
+            }
+        }
+        
+        // Draw frame
+        if (frameToRender && frameToRender.paths) {
+            console.log(`Layer ${layer.id} at frame ${state.currentFrameIndex}: ${frameToRender.paths.length} paths`);
+            frameToRender.paths.forEach(pathData => {
                 const path = createPathElement(pathData);
                 layerGroup.appendChild(path);
             });
@@ -1350,12 +1690,22 @@ function addFrame() {
     const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
     if (!currentLayer) return;
     
-    // Add frame to current layer only
-    currentLayer.frames.push({ paths: [] });
+    // Insert new frame after current frame position
+    // If current frame doesn't exist in this layer, add to end
+    const insertIndex = state.currentFrameIndex + 1;
     
-    // Update max frames and move to new frame
+    if (insertIndex <= currentLayer.frames.length) {
+        // Insert after current frame
+        currentLayer.frames.splice(insertIndex, 0, { paths: [] });
+        state.currentFrameIndex = insertIndex;
+    } else {
+        // Add to end if current index is beyond layer's frames
+        currentLayer.frames.push({ paths: [] });
+        state.currentFrameIndex = currentLayer.frames.length - 1;
+    }
+    
+    // Update max frames
     updateMaxFrames();
-    state.currentFrameIndex = currentLayer.frames.length - 1;
     
     updateFrameList();
     updateFrameCounter();
@@ -1381,6 +1731,74 @@ function duplicateFrame() {
     updateFrameCounter();
     renderFrame();
     saveToLocalStorage();
+}
+
+function addHoldFrame(frameIndex) {
+    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    if (!currentLayer || !currentLayer.frames[frameIndex]) return;
+    
+    const frame = currentLayer.frames[frameIndex];
+    
+    // Don't add hold to a frame that's already a held reference
+    if (frame.holdReference !== undefined) return;
+    
+    // Initialize hold count if not set
+    if (!frame.hold) {
+        frame.hold = 0;
+    }
+    
+    // Increment hold count
+    frame.hold++;
+    
+    // Insert a new held frame after this frame
+    const insertIndex = frameIndex + frame.hold;
+    currentLayer.frames.splice(insertIndex, 0, { 
+        paths: [], 
+        holdReference: frameIndex
+    });
+    
+    updateMaxFrames();
+    updateFrameList();
+    updateLayerList();
+    updateFrameCounter();
+    saveToLocalStorage();
+}
+
+function removeHoldFrame(frameIndex) {
+    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    if (!currentLayer || !currentLayer.frames[frameIndex]) return;
+    
+    const frame = currentLayer.frames[frameIndex];
+    
+    // Can only remove hold from frames that have holds
+    if (!frame.hold || frame.hold <= 0) return;
+    
+    // Find and remove the last held frame
+    let removedCount = 0;
+    for (let i = currentLayer.frames.length - 1; i > frameIndex; i--) {
+        const checkFrame = currentLayer.frames[i];
+        if (checkFrame.holdReference === frameIndex) {
+            currentLayer.frames.splice(i, 1);
+            removedCount++;
+            break; // Remove only one
+        }
+    }
+    
+    // Decrement hold count
+    if (removedCount > 0) {
+        frame.hold--;
+        
+        // Remove hold property if zero
+        if (frame.hold === 0) {
+            delete frame.hold;
+        }
+        
+        updateMaxFrames();
+        updateFrameList();
+        updateLayerList();
+        updateFrameCounter();
+        saveToLocalStorage();
+    }
 }
 
 function deleteFrame() {
@@ -1440,6 +1858,12 @@ function updateFrameList() {
             frameItem.classList.add('active');
         }
         
+        // Mark held frames visually
+        const isHeldFrame = frame.holdReference !== undefined;
+        if (isHeldFrame) {
+            frameItem.classList.add('held-frame');
+        }
+        
         // Create thumbnail SVG
         const thumbSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         thumbSvg.setAttribute('width', '80');
@@ -1447,13 +1871,28 @@ function updateFrameList() {
         thumbSvg.setAttribute('viewBox', '0 0 800 600');
         thumbSvg.style.background = 'white';
         
+        // Get the frame to display (handle held frames)
+        let frameToDisplay = frame;
+        if (frame.holdReference !== undefined) {
+            frameToDisplay = currentLayer.frames[frame.holdReference] || frame;
+        }
+        
         // Show composite of all visible layers at this frame
         state.layers.forEach(layer => {
             if (layer.visible && layer.frames[index]) {
-                layer.frames[index].paths.forEach(pathData => {
-                    const path = createPathElement(pathData);
-                    thumbSvg.appendChild(path);
-                });
+                let layerFrame = layer.frames[index];
+                
+                // Handle held frames for this layer too
+                if (layerFrame.holdReference !== undefined) {
+                    layerFrame = layer.frames[layerFrame.holdReference] || layerFrame;
+                }
+                
+                if (layerFrame.paths) {
+                    layerFrame.paths.forEach(pathData => {
+                        const path = createPathElement(pathData);
+                        thumbSvg.appendChild(path);
+                    });
+                }
             }
         });
         
@@ -1464,6 +1903,47 @@ function updateFrameList() {
         frameNumber.className = 'frame-number';
         frameNumber.textContent = index + 1;
         frameItem.appendChild(frameNumber);
+        
+        // Add hold controls (only for non-held frames)
+        if (!isHeldFrame) {
+            const holdControls = document.createElement('div');
+            holdControls.className = 'hold-controls';
+            
+            // Add hold button (+)
+            const addBtn = document.createElement('button');
+            addBtn.className = 'hold-btn hold-add';
+            addBtn.textContent = '+';
+            addBtn.title = 'Extend frame';
+            addBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                addHoldFrame(index);
+            });
+            
+            // Remove hold button (-) - only show if frame has holds
+            if (frame.hold && frame.hold > 0) {
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'hold-btn hold-remove';
+                removeBtn.textContent = '−';
+                removeBtn.title = 'Remove extension';
+                removeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    removeHoldFrame(index);
+                });
+                holdControls.appendChild(removeBtn);
+            }
+            
+            holdControls.appendChild(addBtn);
+            frameItem.appendChild(holdControls);
+        }
+        
+        // Add hold count indicator if this frame has holds
+        if (frame.hold && frame.hold > 0) {
+            const holdBadge = document.createElement('div');
+            holdBadge.className = 'hold-badge';
+            holdBadge.textContent = `×${frame.hold}`;
+            holdBadge.title = `Extended for ${frame.hold} frame(s)`;
+            frameItem.appendChild(holdBadge);
+        }
         
         frameItem.addEventListener('click', () => selectFrame(index));
         frameList.appendChild(frameItem);
@@ -1515,15 +1995,33 @@ function startPlayback() {
     
     // Use requestAnimationFrame for smoother playback on mobile
     let lastFrameTime = Date.now();
+    let iterationCount = 0; // Safety counter
+    const MAX_ITERATIONS = 10000; // Prevent infinite loops
     
     const playbackLoop = () => {
-        // Critical: Check if we should still be playing
+        // CRITICAL: Multiple stop checks
         if (!state.isPlaying) {
-            console.log('Playback stopped in loop');
+            console.log('Playback stopped in loop (state check)');
             if (state.playInterval) {
                 cancelAnimationFrame(state.playInterval);
                 state.playInterval = null;
             }
+            return;
+        }
+        
+        // Safety: iteration limit
+        iterationCount++;
+        if (iterationCount > MAX_ITERATIONS) {
+            console.error('Playback exceeded max iterations! Force stop.');
+            stopPlayback();
+            return;
+        }
+        
+        // UI validation: check button icon
+        const iconEl = playBtn ? playBtn.querySelector('.icon') : null;
+        if (iconEl && iconEl.textContent !== '⏹') {
+            console.warn('Button icon mismatch detected! Force stop.');
+            stopPlayback();
             return;
         }
         
@@ -1549,8 +2047,12 @@ function startPlayback() {
             }
         }
         
-        // Continue loop
-        state.playInterval = requestAnimationFrame(playbackLoop);
+        // Continue loop ONLY if still playing
+        if (state.isPlaying) {
+            state.playInterval = requestAnimationFrame(playbackLoop);
+        } else {
+            console.log('State changed, not scheduling next frame');
+        }
     };
     
     // Start the loop
@@ -1561,13 +2063,26 @@ function startPlayback() {
 function stopPlayback() {
     console.log('stopPlayback called'); // Debug log
     
-    // Update state immediately - this is critical for button responsiveness
+    // CRITICAL: Set state FIRST before anything else
+    const wasPlaying = state.isPlaying;
     state.isPlaying = false;
     
-    // Clear interval/animation frame if it exists
+    // Force clear interval/animation frame with multiple attempts
     if (state.playInterval) {
-        cancelAnimationFrame(state.playInterval);
+        try {
+            cancelAnimationFrame(state.playInterval);
+        } catch (err) {
+            console.error('Error canceling animation frame:', err);
+        }
         state.playInterval = null;
+    }
+    
+    // Additional cleanup: clear any lingering intervals (belt and suspenders)
+    if (wasPlaying) {
+        // Force stop any possible interval that might be running
+        for (let i = 1; i < 9999; i++) {
+            window.clearInterval(i);
+        }
     }
     
     // Update button to Play icon
@@ -1577,6 +2092,10 @@ function stopPlayback() {
         if (iconEl) iconEl.textContent = '▶'; // Play icon
         playBtn.title = 'Play';
         playBtn.classList.remove('playing');
+        
+        // Force button to be re-enabled (critical for iPad)
+        playBtn.disabled = false;
+        playBtn.style.pointerEvents = 'auto';
     }
     
     // Force a final render to ensure UI is in sync
@@ -1587,6 +2106,8 @@ function stopPlayback() {
     } catch (err) {
         console.error('Stop playback render error:', err);
     }
+    
+    console.log('stopPlayback complete, isPlaying:', state.isPlaying);
 }
 
 // ==================== UNDO/REDO ====================
@@ -1666,7 +2187,9 @@ function saveToLocalStorage() {
             layerIdCounter: state.layerIdCounter,
             fps: state.fps,
             backgroundColor: state.backgroundColor,
-            version: '4.1' // Updated version with background color
+            onionSkinEnabled: state.onionSkinEnabled,
+            onionSkinSettings: state.onionSkinSettings,
+            version: '4.2' // Updated version with onion skin settings
         };
         localStorage.setItem('vectorAnimationToolData', JSON.stringify(saveData));
     } catch (e) {
@@ -1681,7 +2204,7 @@ function loadFromLocalStorage() {
             const data = JSON.parse(savedData);
             
             // Check if data has layer-centric structure
-            if ((data.version === '4.0' || data.version === '4.1') && data.layers && data.layers[0] && data.layers[0].frames) {
+            if ((data.version === '4.0' || data.version === '4.1' || data.version === '4.2') && data.layers && data.layers[0] && data.layers[0].frames) {
                 state.layers = data.layers;
                 state.currentLayerId = data.currentLayerId || state.layers[0].id;
                 state.currentFrameIndex = data.currentFrameIndex || 0;
@@ -1689,6 +2212,12 @@ function loadFromLocalStorage() {
                 state.layerIdCounter = data.layerIdCounter || 1;
                 state.fps = data.fps || 12;
                 state.backgroundColor = data.backgroundColor || '#ffffff';
+                
+                // Load onion skin settings (default to enabled if not present)
+                state.onionSkinEnabled = data.onionSkinEnabled !== undefined ? data.onionSkinEnabled : true;
+                if (data.onionSkinSettings) {
+                    state.onionSkinSettings = data.onionSkinSettings;
+                }
             } else {
                 // Old format - reset
                 console.log('Old data format detected, resetting...');
