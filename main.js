@@ -345,46 +345,27 @@ function setupEventListeners() {
     // Playback controls - single Play/Stop toggle button
     const playBtn = document.getElementById('playBtn');
     
-    // Ultra-defensive event handling for iPad
-    playBtn.addEventListener('click', (e) => {
+    let playBtnTouchHandled = false;
+    
+    // Use touchstart for iPad (more reliable than click)
+    playBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation(); // Stop ALL handlers
-        
-        console.log('Play button clicked, current state.isPlaying:', state.isPlaying);
-        
-        // Force check button state vs internal state (iPad Safari bug workaround)
-        const iconEl = playBtn.querySelector('.icon');
-        const iconText = iconEl ? iconEl.textContent : '';
-        
-        // If button shows stop icon (⏹) but state says not playing, force stop
-        if (iconText === '⏹' && !state.isPlaying) {
-            console.warn('Button/state mismatch detected! Forcing stop.');
-            stopPlayback();
+        playBtnTouchHandled = true;
+        console.log('Play button touched (touchstart)');
+        togglePlayback();
+    }, { passive: false });
+    
+    // Fallback to click for desktop
+    playBtn.addEventListener('click', (e) => {
+        // Prevent if already handled by touch
+        if (playBtnTouchHandled) {
+            playBtnTouchHandled = false;
             return;
         }
         
-        // Normal toggle
-        togglePlayback();
-        
-    }, { passive: false, capture: true }); // Capture phase + non-passive
-    
-    // Additional safety: touchend event (iPad sometimes misses click)
-    playBtn.addEventListener('touchend', (e) => {
         e.preventDefault();
-        e.stopPropagation();
-        
-        // Small delay to prevent double-trigger with click
-        setTimeout(() => {
-            const iconEl = playBtn.querySelector('.icon');
-            const iconText = iconEl ? iconEl.textContent : '';
-            
-            // Check for stuck state
-            if (iconText === '⏹' && !state.isPlaying) {
-                console.warn('Stuck state detected on touchend! Forcing stop.');
-                stopPlayback();
-            }
-        }, 50);
+        console.log('Play button clicked (click)');
+        togglePlayback();
     }, { passive: false });
     
     // Failsafe: Double-tap anywhere on timeline controls to stop playback
@@ -1898,6 +1879,17 @@ function updateFrameList() {
         
         frameItem.appendChild(thumbSvg);
         
+        // Add touch-friendly tap area overlay (doesn't block other elements)
+        const tapArea = document.createElement('div');
+        tapArea.className = 'frame-tap-area';
+        tapArea.addEventListener('click', (e) => {
+            // Only trigger if not clicking on buttons
+            if (!e.target.classList.contains('hold-btn')) {
+                selectFrame(index);
+            }
+        });
+        frameItem.appendChild(tapArea);
+        
         // Add frame number
         const frameNumber = document.createElement('div');
         frameNumber.className = 'frame-number';
@@ -1945,7 +1937,6 @@ function updateFrameList() {
             frameItem.appendChild(holdBadge);
         }
         
-        frameItem.addEventListener('click', () => selectFrame(index));
         frameList.appendChild(frameItem);
     });
 }

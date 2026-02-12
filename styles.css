@@ -921,6 +921,17 @@ body {
     opacity: 1;
 }
 
+/* Frame tap area for touch devices */
+.frame-tap-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1;
+    cursor: pointer;
+}
+
 /* Hold controls (+/- buttons on frame) */
 .hold-controls {
     position: absolute;
@@ -928,17 +939,25 @@ body {
     left: 2px;
     display: flex;
     gap: 2px;
-    opacity: 0;
+    opacity: 0.6; /* Always visible on touch devices */
     transition: opacity 0.15s ease;
+    z-index: 2; /* Above tap area */
 }
 
 .frame-item:hover .hold-controls {
     opacity: 1;
 }
 
+/* On touch devices, make controls always visible */
+@media (hover: none) {
+    .hold-controls {
+        opacity: 1;
+    }
+}
+
 .hold-btn {
-    width: 20px;
-    height: 20px;
+    width: 24px; /* Bigger for touch */
+    height: 24px;
     border: none;
     background: rgba(0, 0, 0, 0.7);
     color: white;
@@ -952,6 +971,8 @@ body {
     justify-content: center;
     transition: all 0.15s ease;
     padding: 0;
+    position: relative;
+    z-index: 3; /* Ensure clickable */
 }
 
 .hold-btn:hover {
@@ -979,6 +1000,7 @@ body {
     font-size: 9px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+    z-index: 2;
 }
 
 /* Layers Section - Part of timeline */
