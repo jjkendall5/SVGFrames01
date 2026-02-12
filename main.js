@@ -401,7 +401,40 @@ function setupEventListeners() {
     document.getElementById('redoBtn').addEventListener('click', redo);
 
     // Export/Import
-    document.getElementById('exportGifBtn').addEventListener('click', exportAsGIF);
+    // Export menu toggle
+    document.getElementById('exportMenuBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const menu = document.getElementById('exportMenu');
+        const isVisible = menu.style.display !== 'none';
+        menu.style.display = isVisible ? 'none' : 'block';
+    });
+    
+    // Close export menu when clicking outside
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('exportMenu');
+        const menuBtn = document.getElementById('exportMenuBtn');
+        if (menu.style.display === 'block' && 
+            !menu.contains(e.target) && 
+            !menuBtn.contains(e.target)) {
+            menu.style.display = 'none';
+        }
+    });
+    
+    // Export options
+    document.getElementById('exportGifBtn').addEventListener('click', () => {
+        document.getElementById('exportMenu').style.display = 'none';
+        exportAsGIF();
+    });
+    
+    document.getElementById('exportPngBtn').addEventListener('click', () => {
+        document.getElementById('exportMenu').style.display = 'none';
+        exportAsPNGSequence();
+    });
+    
+    document.getElementById('exportMp4Btn').addEventListener('click', () => {
+        document.getElementById('exportMenu').style.display = 'none';
+        exportAsMP4();
+    });
     document.getElementById('exportJsonBtn').addEventListener('click', exportProject);
     document.getElementById('importJsonBtn').addEventListener('click', () => {
         document.getElementById('fileInput').click();
@@ -2410,6 +2443,172 @@ async function exportAsGIF() {
         }
         exportBtn.disabled = false;
         exportBtn.textContent = originalText;
+    }
+}
+
+// Export as PNG sequence (ZIP file)
+async function exportAsPNGSequence() {
+    // Check if JSZip is available
+    if (typeof JSZip === 'undefined') {
+        showAlert('Please include JSZip library:\n<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>', 'Library Missing');
+        return;
+    }
+    
+    const exportBtn = document.getElementById('exportPngBtn');
+    const originalText = exportBtn.innerHTML;
+    exportBtn.disabled = true;
+    exportBtn.innerHTML = '<span class="export-icon">⏳</span><span class="export-label">Exporting…</span>';
+    
+    const loading = document.createElement('div');
+    loading.className = 'loading';
+    loading.textContent = 'Rendering frames...';
+    document.body.appendChild(loading);
+    
+    try {
+        const zip = new JSZip();
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = state.canvasWidth;
+        tempCanvas.height = state.canvasHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // Render each frame as PNG
+        for (let i = 0; i < state.maxFrames; i++) {
+            loading.textContent = `Rendering frame ${i + 1}/${state.maxFrames}...`;
+            await new Promise(resolve => setTimeout(resolve, 10));
+            
+            // Clear and draw background
+            tempCtx.clearRect(0, 0, state.canvasWidth, state.canvasHeight);
+            if (state.backgroundColor !== 'transparent') {
+                tempCtx.fillStyle = state.backgroundColor;
+                tempCtx.fillRect(0, 0, state.canvasWidth, state.canvasHeight);
+            }
+            
+            // Render frame
+            await renderFrameToCanvas(tempCtx, i);
+            
+            // Convert to blob and add to zip
+            const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/png'));
+            const frameNumber = String(i + 1).padStart(4, '0');
+            zip.file(`frame_${frameNumber}.png`, blob);
+        }
+        
+        loading.textContent = 'Creating ZIP file...';
+        
+        // Generate ZIP
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        
+        // Download ZIP
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(zipBlob);
+        link.download = `animation-${Date.now()}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+        
+        if (document.body.contains(loading)) {
+            document.body.removeChild(loading);
+        }
+        exportBtn.disabled = false;
+        exportBtn.innerHTML = originalText;
+        
+    } catch (err) {
+        console.error('PNG sequence export error:', err);
+        showAlert('Failed to export PNG sequence: ' + err.message, 'Export Error');
+        if (document.body.contains(loading)) {
+            document.body.removeChild(loading);
+        }
+        exportBtn.disabled = false;
+        exportBtn.innerHTML = originalText;
+    }
+}
+
+// Export as MP4 video (using mp4-wasm for direct MP4 encoding)
+async function exportAsMP4() {
+    // Check if mp4-wasm is available
+    if (typeof Mp4Wasm === 'undefined') {
+        showAlert('MP4 library not loaded. Please refresh the page and try again.', 'Error');
+        return;
+    }
+    
+    const exportBtn = document.getElementById('exportMp4Btn');
+    const originalText = exportBtn.innerHTML;
+    exportBtn.disabled = true;
+    exportBtn.innerHTML = '<span class="export-icon">⏳</span><span class="export-label">Encoding…</span>';
+    
+    const loading = document.createElement('div');
+    loading.className = 'loading';
+    loading.textContent = 'Preparing MP4 encoder...';
+    document.body.appendChild(loading);
+    
+    try {
+        // Initialize mp4-wasm encoder
+        loading.textContent = 'Initializing encoder...';
+        const encoder = Mp4Wasm.createWebCodecsEncoder({
+            width: state.canvasWidth,
+            height: state.canvasHeight,
+            fps: state.fps,
+            codec: 'avc',
+            avc: { profile: 'Main', level: '5.2' }
+        });
+        
+        await encoder.initialize();
+        
+        // Create temporary canvas for rendering
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = state.canvasWidth;
+        tempCanvas.height = state.canvasHeight;
+        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+        
+        // Encode each frame
+        for (let i = 0; i < state.maxFrames; i++) {
+            loading.textContent = `Encoding frame ${i + 1}/${state.maxFrames}...`;
+            await new Promise(resolve => setTimeout(resolve, 10));
+            
+            // Clear and draw background
+            tempCtx.clearRect(0, 0, state.canvasWidth, state.canvasHeight);
+            if (state.backgroundColor !== 'transparent') {
+                tempCtx.fillStyle = state.backgroundColor;
+                tempCtx.fillRect(0, 0, state.canvasWidth, state.canvasHeight);
+            }
+            
+            // Render frame
+            await renderFrameToCanvas(tempCtx, i);
+            
+            // Get image data and encode
+            const imageData = tempCtx.getImageData(0, 0, state.canvasWidth, state.canvasHeight);
+            await encoder.addFrame(imageData);
+        }
+        
+        loading.textContent = 'Finalizing MP4...';
+        
+        // Finalize and get MP4 data
+        const mp4Data = await encoder.end();
+        
+        // Create download
+        const blob = new Blob([mp4Data], { type: 'video/mp4' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `animation-${Date.now()}.mp4`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+        
+        if (document.body.contains(loading)) {
+            document.body.removeChild(loading);
+        }
+        exportBtn.disabled = false;
+        exportBtn.innerHTML = originalText;
+        
+    } catch (err) {
+        console.error('MP4 export error:', err);
+        showAlert('Failed to export MP4: ' + err.message, 'Export Error');
+        if (document.body.contains(loading)) {
+            document.body.removeChild(loading);
+        }
+        exportBtn.disabled = false;
+        exportBtn.innerHTML = originalText;
     }
 }
 
