@@ -230,6 +230,97 @@ body {
     margin: 0 var(--space-2);
 }
 
+/* Export menu dropdown */
+.export-menu-container {
+    position: relative;
+}
+
+.dropdown-arrow {
+    font-size: 9px;
+    margin-left: 4px;
+    transition: transform 0.2s ease;
+    opacity: 0.6;
+}
+
+.header-btn:hover .dropdown-arrow {
+    opacity: 1;
+}
+
+.export-menu {
+    position: absolute;
+    top: 40px;
+    left: 0;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    padding: var(--space-2);
+    z-index: 1000;
+    min-width: 220px;
+    animation: dropdownFadeIn 0.15s ease;
+}
+
+@keyframes dropdownFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.export-option {
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    transition: all 0.15s ease;
+    text-align: left;
+    margin-bottom: var(--space-1);
+}
+
+.export-option:last-child {
+    margin-bottom: 0;
+}
+
+.export-option:hover {
+    background: var(--accent-bg);
+    color: var(--accent);
+    transform: translateX(4px);
+}
+
+.export-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.export-label {
+    flex: 1;
+    font-weight: 500;
+}
+
+/* Add subtle separator */
+.export-option + .export-option {
+    border-top: 1px solid var(--border);
+    padding-top: calc(var(--space-2) + var(--space-1));
+    margin-top: var(--space-1);
+}
+
 /* ==================== WORKSPACE ==================== */
 .workspace {
     flex: 1; /* Take all remaining space between header and timeline */

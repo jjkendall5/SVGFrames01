@@ -2523,10 +2523,10 @@ async function exportAsPNGSequence() {
     }
 }
 
-// Export as MP4 video (using mp4-wasm for direct MP4 encoding)
+// Export as MP4 video (using ffmpeg.wasm for direct MP4 encoding)
 async function exportAsMP4() {
-    // Check if mp4-wasm is available
-    if (typeof Mp4Wasm === 'undefined') {
+    // Check if FFmpeg is available
+    if (typeof FFmpeg === 'undefined' || typeof FFmpegUtil === 'undefined') {
         showAlert('MP4 library not loaded. Please refresh the page and try again.', 'Error');
         return;
     }
@@ -2538,31 +2538,39 @@ async function exportAsMP4() {
     
     const loading = document.createElement('div');
     loading.className = 'loading';
-    loading.textContent = 'Preparing MP4 encoder...';
+    loading.textContent = 'Loading FFmpeg...';
     document.body.appendChild(loading);
     
     try {
-        // Initialize mp4-wasm encoder
-        loading.textContent = 'Initializing encoder...';
-        const encoder = Mp4Wasm.createWebCodecsEncoder({
-            width: state.canvasWidth,
-            height: state.canvasHeight,
-            fps: state.fps,
-            codec: 'avc',
-            avc: { profile: 'Main', level: '5.2' }
+        // Initialize FFmpeg
+        const { FFmpeg } = FFmpegUtil;
+        const { fetchFile } = FFmpegUtil;
+        const ffmpeg = new FFmpeg.FFmpeg();
+        
+        ffmpeg.on('log', ({ message }) => {
+            console.log(message);
         });
         
-        await encoder.initialize();
+        ffmpeg.on('progress', ({ progress }) => {
+            const percent = Math.round(progress * 100);
+            loading.textContent = `Encoding MP4... ${percent}%`;
+        });
+        
+        loading.textContent = 'Loading FFmpeg engine...';
+        await ffmpeg.load({
+            coreURL: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js'
+        });
         
         // Create temporary canvas for rendering
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = state.canvasWidth;
         tempCanvas.height = state.canvasHeight;
-        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+        const tempCtx = tempCanvas.getContext('2d');
         
-        // Encode each frame
+        // Render each frame as PNG
+        loading.textContent = 'Rendering frames...';
         for (let i = 0; i < state.maxFrames; i++) {
-            loading.textContent = `Encoding frame ${i + 1}/${state.maxFrames}...`;
+            loading.textContent = `Rendering frame ${i + 1}/${state.maxFrames}...`;
             await new Promise(resolve => setTimeout(resolve, 10));
             
             // Clear and draw background
@@ -2575,18 +2583,31 @@ async function exportAsMP4() {
             // Render frame
             await renderFrameToCanvas(tempCtx, i);
             
-            // Get image data and encode
-            const imageData = tempCtx.getImageData(0, 0, state.canvasWidth, state.canvasHeight);
-            await encoder.addFrame(imageData);
+            // Convert to PNG and write to FFmpeg
+            const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/png'));
+            const frameNumber = String(i + 1).padStart(4, '0');
+            const data = await fetchFile(blob);
+            await ffmpeg.writeFile(`frame_${frameNumber}.png`, data);
         }
         
-        loading.textContent = 'Finalizing MP4...';
+        loading.textContent = 'Encoding MP4...';
         
-        // Finalize and get MP4 data
-        const mp4Data = await encoder.end();
+        // Run FFmpeg to create MP4
+        await ffmpeg.exec([
+            '-framerate', String(state.fps),
+            '-i', 'frame_%04d.png',
+            '-c:v', 'libx264',
+            '-pix_fmt', 'yuv420p',
+            '-preset', 'medium',
+            '-crf', '23',
+            'output.mp4'
+        ]);
+        
+        // Read the output file
+        const data = await ffmpeg.readFile('output.mp4');
         
         // Create download
-        const blob = new Blob([mp4Data], { type: 'video/mp4' });
+        const blob = new Blob([data.buffer], { type: 'video/mp4' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         link.download = `animation-${Date.now()}.mp4`;
@@ -2603,7 +2624,7 @@ async function exportAsMP4() {
         
     } catch (err) {
         console.error('MP4 export error:', err);
-        showAlert('Failed to export MP4: ' + err.message, 'Export Error');
+        showAlert('Failed to export MP4: ' + err.message + '\n\nTry using PNG Sequence export instead.', 'Export Error');
         if (document.body.contains(loading)) {
             document.body.removeChild(loading);
         }
