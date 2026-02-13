@@ -2596,7 +2596,12 @@ async function exportAsMP4() {
         });
         
         loading.textContent = 'Loading FFmpeg engine (first time may take a moment)...';
-        await ffmpeg.load();
+        
+        // Load with custom baseURL to avoid CORS issues on GitHub Pages
+        await ffmpeg.load({
+            coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js',
+            wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm',
+        });
         
         // Create temporary canvas for rendering
         const tempCanvas = document.createElement('canvas');
