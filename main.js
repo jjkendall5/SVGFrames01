@@ -402,37 +402,58 @@ function setupEventListeners() {
 
     // Export/Import
     // Export menu toggle
-    document.getElementById('exportMenuBtn').addEventListener('click', (e) => {
+    const exportMenuBtn = document.getElementById('exportMenuBtn');
+    const exportMenu = document.getElementById('exportMenu');
+    
+    exportMenuBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const menu = document.getElementById('exportMenu');
-        const isVisible = menu.style.display !== 'none';
-        menu.style.display = isVisible ? 'none' : 'block';
+        console.log('Export menu button clicked');
+        const isVisible = exportMenu.style.display === 'block';
+        
+        if (isVisible) {
+            exportMenu.style.display = 'none';
+            exportMenu.style.visibility = 'hidden';
+            exportMenu.style.opacity = '0';
+        } else {
+            exportMenu.style.display = 'block';
+            exportMenu.style.visibility = 'visible';
+            exportMenu.style.opacity = '1';
+        }
+        
+        console.log('Menu display set to:', exportMenu.style.display);
+        console.log('Menu computed style:', window.getComputedStyle(exportMenu).display);
     });
     
     // Close export menu when clicking outside
     document.addEventListener('click', (e) => {
-        const menu = document.getElementById('exportMenu');
-        const menuBtn = document.getElementById('exportMenuBtn');
-        if (menu.style.display === 'block' && 
-            !menu.contains(e.target) && 
-            !menuBtn.contains(e.target)) {
-            menu.style.display = 'none';
+        if (exportMenu.style.display === 'block' && 
+            !exportMenu.contains(e.target) && 
+            !exportMenuBtn.contains(e.target)) {
+            exportMenu.style.display = 'none';
+            exportMenu.style.visibility = 'hidden';
+            exportMenu.style.opacity = '0';
         }
     });
     
     // Export options
     document.getElementById('exportGifBtn').addEventListener('click', () => {
-        document.getElementById('exportMenu').style.display = 'none';
+        exportMenu.style.display = 'none';
+        exportMenu.style.visibility = 'hidden';
+        exportMenu.style.opacity = '0';
         exportAsGIF();
     });
     
     document.getElementById('exportPngBtn').addEventListener('click', () => {
-        document.getElementById('exportMenu').style.display = 'none';
+        exportMenu.style.display = 'none';
+        exportMenu.style.visibility = 'hidden';
+        exportMenu.style.opacity = '0';
         exportAsPNGSequence();
     });
     
     document.getElementById('exportMp4Btn').addEventListener('click', () => {
-        document.getElementById('exportMenu').style.display = 'none';
+        exportMenu.style.display = 'none';
+        exportMenu.style.visibility = 'hidden';
+        exportMenu.style.opacity = '0';
         exportAsMP4();
     });
     document.getElementById('exportJsonBtn').addEventListener('click', exportProject);
