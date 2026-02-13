@@ -51,6 +51,12 @@ function init() {
     // Fix iOS Safari viewport height issue
     fixIOSViewportHeight();
     
+    // Check what libraries are loaded
+    console.log('Libraries loaded:');
+    console.log('- gifshot:', typeof gifshot !== 'undefined' ? '✓' : '✗');
+    console.log('- JSZip:', typeof JSZip !== 'undefined' ? '✓' : '✗');
+    console.log('- FFmpegWASM:', typeof FFmpegWASM !== 'undefined' ? '✓' : '✗');
+    
     // Start playback watchdog (checks for stuck states every second)
     startPlaybackWatchdog();
     
@@ -2546,16 +2552,28 @@ async function exportAsPNGSequence() {
 
 // Export as MP4 video (using ffmpeg.wasm for direct MP4 encoding)
 async function exportAsMP4() {
-    // Check if FFmpeg is available
-    if (typeof FFmpeg === 'undefined' || typeof FFmpegUtil === 'undefined') {
-        showAlert('MP4 library not loaded. Please refresh the page and try again.', 'Error');
+    // Debug: Log all global FFmpeg-related objects
+    console.log('=== MP4 Export Debug ===');
+    console.log('window.FFmpegWASM:', typeof window.FFmpegWASM);
+    console.log('window.FFmpeg:', typeof window.FFmpeg);
+    console.log('Global FFmpegWASM:', typeof FFmpegWASM);
+    console.log('All window keys with FFmpeg:', Object.keys(window).filter(k => k.includes('FFmpeg') || k.includes('ffmpeg')));
+    
+    // Check if FFmpeg is available (try multiple possible names)
+    const FFmpegLib = window.FFmpegWASM || window.FFmpeg || (typeof FFmpegWASM !== 'undefined' ? FFmpegWASM : null);
+    
+    if (!FFmpegLib) {
+        console.error('FFmpeg library not found in any expected location');
+        showAlert('FFmpeg library not loaded. Please refresh the page and try again.\n\nNote: MP4 export requires an internet connection to load the encoding library (~30MB).\n\nAlternative: Use PNG Sequence export which works offline.', 'Library Not Loaded');
         return;
     }
+    
+    console.log('✓ FFmpeg library found!');
     
     const exportBtn = document.getElementById('exportMp4Btn');
     const originalText = exportBtn.innerHTML;
     exportBtn.disabled = true;
-    exportBtn.innerHTML = '<span class="export-icon">⏳</span><span class="export-label">Encoding…</span>';
+    exportBtn.innerHTML = '<span class="export-icon">⏳</span><span class="export-label">Loading…</span>';
     
     const loading = document.createElement('div');
     loading.className = 'loading';
@@ -2564,12 +2582,12 @@ async function exportAsMP4() {
     
     try {
         // Initialize FFmpeg
-        const { FFmpeg } = FFmpegUtil;
-        const { fetchFile } = FFmpegUtil;
-        const ffmpeg = new FFmpeg.FFmpeg();
+        const { FFmpeg } = FFmpegLib;
+        const { fetchFile } = FFmpegLib;
+        const ffmpeg = new FFmpeg();
         
         ffmpeg.on('log', ({ message }) => {
-            console.log(message);
+            console.log('FFmpeg:', message);
         });
         
         ffmpeg.on('progress', ({ progress }) => {
@@ -2577,10 +2595,8 @@ async function exportAsMP4() {
             loading.textContent = `Encoding MP4... ${percent}%`;
         });
         
-        loading.textContent = 'Loading FFmpeg engine...';
-        await ffmpeg.load({
-            coreURL: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js'
-        });
+        loading.textContent = 'Loading FFmpeg engine (first time may take a moment)...';
+        await ffmpeg.load();
         
         // Create temporary canvas for rendering
         const tempCanvas = document.createElement('canvas');
@@ -2645,7 +2661,7 @@ async function exportAsMP4() {
         
     } catch (err) {
         console.error('MP4 export error:', err);
-        showAlert('Failed to export MP4: ' + err.message + '\n\nTry using PNG Sequence export instead.', 'Export Error');
+        showAlert('Failed to export MP4: ' + err.message + '\n\nTry using PNG Sequence export instead, which works offline.', 'Export Error');
         if (document.body.contains(loading)) {
             document.body.removeChild(loading);
         }
