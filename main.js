@@ -2550,7 +2550,7 @@ async function exportAsPNGSequence() {
     }
 }
 
-// Export as MP4 video (using MediaRecorder API - works everywhere including GitHub Pages)
+// Export as Video (WebM format - universally playable, easily convertible to MP4)
 async function exportAsMP4() {
     // Check if MediaRecorder is supported
     if (!window.MediaRecorder) {
@@ -2581,7 +2581,6 @@ async function exportAsMP4() {
         // Try different codecs in order of preference
         let mimeType;
         const codecs = [
-            'video/webm;codecs=h264',
             'video/webm;codecs=vp9',
             'video/webm;codecs=vp8',
             'video/webm'
@@ -2614,10 +2613,7 @@ async function exportAsMP4() {
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            
-            // Determine file extension
-            const ext = mimeType.includes('webm') ? 'webm' : 'mp4';
-            link.download = `animation-${Date.now()}.${ext}`;
+            link.download = `animation-${Date.now()}.webm`;
             
             document.body.appendChild(link);
             link.click();
@@ -2630,11 +2626,17 @@ async function exportAsMP4() {
             exportBtn.disabled = false;
             exportBtn.innerHTML = originalText;
             
-            // Show completion message
-            const msg = ext === 'webm' 
-                ? 'Video exported as WebM (widely supported).\n\nTo convert to MP4, use a free online converter like CloudConvert or HandBrake.'
-                : 'Video exported successfully!';
-            showAlert(msg, 'Export Complete');
+            // Show completion message with conversion instructions
+            showAlert(
+                'Video exported as WebM (plays in Chrome, Firefox, VLC).\n\n' +
+                'To convert to MP4:\n' +
+                '1. Visit cloudconvert.com (free)\n' +
+                '2. Upload your .webm file\n' +
+                '3. Convert to MP4\n' +
+                '4. Download - done in 30 seconds!\n\n' +
+                'Or use HandBrake/VLC for offline conversion.',
+                'Export Complete'
+            );
         };
         
         // Start recording
