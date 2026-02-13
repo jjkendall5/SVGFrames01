@@ -2550,123 +2550,127 @@ async function exportAsPNGSequence() {
     }
 }
 
-// Export as MP4 video (using ffmpeg.wasm for direct MP4 encoding)
+// Export as MP4 video (using MediaRecorder API - works everywhere including GitHub Pages)
 async function exportAsMP4() {
-    // Debug: Log all global FFmpeg-related objects
-    console.log('=== MP4 Export Debug ===');
-    console.log('window.FFmpegWASM:', typeof window.FFmpegWASM);
-    console.log('window.FFmpeg:', typeof window.FFmpeg);
-    console.log('Global FFmpegWASM:', typeof FFmpegWASM);
-    console.log('All window keys with FFmpeg:', Object.keys(window).filter(k => k.includes('FFmpeg') || k.includes('ffmpeg')));
-    
-    // Check if FFmpeg is available (try multiple possible names)
-    const FFmpegLib = window.FFmpegWASM || window.FFmpeg || (typeof FFmpegWASM !== 'undefined' ? FFmpegWASM : null);
-    
-    if (!FFmpegLib) {
-        console.error('FFmpeg library not found in any expected location');
-        showAlert('FFmpeg library not loaded. Please refresh the page and try again.\n\nNote: MP4 export requires an internet connection to load the encoding library (~30MB).\n\nAlternative: Use PNG Sequence export which works offline.', 'Library Not Loaded');
+    // Check if MediaRecorder is supported
+    if (!window.MediaRecorder) {
+        showAlert('Video recording not supported in this browser. Please use Chrome, Firefox, or Edge.\n\nAlternative: Use PNG Sequence export.', 'Not Supported');
         return;
     }
-    
-    console.log('✓ FFmpeg library found!');
     
     const exportBtn = document.getElementById('exportMp4Btn');
     const originalText = exportBtn.innerHTML;
     exportBtn.disabled = true;
-    exportBtn.innerHTML = '<span class="export-icon">⏳</span><span class="export-label">Loading…</span>';
+    exportBtn.innerHTML = '<span class="export-icon">⏳</span><span class="export-label">Recording…</span>';
     
     const loading = document.createElement('div');
     loading.className = 'loading';
-    loading.textContent = 'Loading FFmpeg...';
+    loading.textContent = 'Preparing to record...';
     document.body.appendChild(loading);
     
     try {
-        // Initialize FFmpeg
-        const { FFmpeg } = FFmpegLib;
-        const { fetchFile } = FFmpegLib;
-        const ffmpeg = new FFmpeg();
+        // Create offscreen canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = state.canvasWidth;
+        canvas.height = state.canvasHeight;
+        const ctx = canvas.getContext('2d');
         
-        ffmpeg.on('log', ({ message }) => {
-            console.log('FFmpeg:', message);
+        // Capture stream from canvas
+        const stream = canvas.captureStream(state.fps);
+        
+        // Try different codecs in order of preference
+        let mimeType;
+        const codecs = [
+            'video/webm;codecs=h264',
+            'video/webm;codecs=vp9',
+            'video/webm;codecs=vp8',
+            'video/webm'
+        ];
+        
+        for (const codec of codecs) {
+            if (MediaRecorder.isTypeSupported(codec)) {
+                mimeType = codec;
+                console.log('Using codec:', codec);
+                break;
+            }
+        }
+        
+        // Set up recorder
+        const mediaRecorder = new MediaRecorder(stream, {
+            mimeType: mimeType,
+            videoBitsPerSecond: 8000000 // 8 Mbps for good quality
         });
         
-        ffmpeg.on('progress', ({ progress }) => {
-            const percent = Math.round(progress * 100);
-            loading.textContent = `Encoding MP4... ${percent}%`;
-        });
+        const chunks = [];
+        mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+                chunks.push(e.data);
+            }
+        };
         
-        loading.textContent = 'Loading FFmpeg engine (first time may take a moment)...';
-        
-        // Load with custom baseURL to avoid CORS issues on GitHub Pages
-        await ffmpeg.load({
-            coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js',
-            wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm',
-        });
-        
-        // Create temporary canvas for rendering
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = state.canvasWidth;
-        tempCanvas.height = state.canvasHeight;
-        const tempCtx = tempCanvas.getContext('2d');
-        
-        // Render each frame as PNG
-        loading.textContent = 'Rendering frames...';
-        for (let i = 0; i < state.maxFrames; i++) {
-            loading.textContent = `Rendering frame ${i + 1}/${state.maxFrames}...`;
-            await new Promise(resolve => setTimeout(resolve, 10));
+        // When recording stops, download the file
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(chunks, { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
             
-            // Clear and draw background
-            tempCtx.clearRect(0, 0, state.canvasWidth, state.canvasHeight);
+            // Determine file extension
+            const ext = mimeType.includes('webm') ? 'webm' : 'mp4';
+            link.download = `animation-${Date.now()}.${ext}`;
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            
+            if (document.body.contains(loading)) {
+                document.body.removeChild(loading);
+            }
+            exportBtn.disabled = false;
+            exportBtn.innerHTML = originalText;
+            
+            // Show completion message
+            const msg = ext === 'webm' 
+                ? 'Video exported as WebM (widely supported).\n\nTo convert to MP4, use a free online converter like CloudConvert or HandBrake.'
+                : 'Video exported successfully!';
+            showAlert(msg, 'Export Complete');
+        };
+        
+        // Start recording
+        mediaRecorder.start();
+        loading.textContent = 'Recording animation...';
+        
+        // Calculate frame duration in milliseconds
+        const frameDuration = 1000 / state.fps;
+        
+        // Render and record each frame
+        for (let i = 0; i < state.maxFrames; i++) {
+            loading.textContent = `Recording frame ${i + 1}/${state.maxFrames}...`;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw background
             if (state.backgroundColor !== 'transparent') {
-                tempCtx.fillStyle = state.backgroundColor;
-                tempCtx.fillRect(0, 0, state.canvasWidth, state.canvasHeight);
+                ctx.fillStyle = state.backgroundColor;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
             }
             
             // Render frame
-            await renderFrameToCanvas(tempCtx, i);
+            await renderFrameToCanvas(ctx, i);
             
-            // Convert to PNG and write to FFmpeg
-            const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/png'));
-            const frameNumber = String(i + 1).padStart(4, '0');
-            const data = await fetchFile(blob);
-            await ffmpeg.writeFile(`frame_${frameNumber}.png`, data);
+            // Wait for the frame duration to maintain correct timing
+            await new Promise(resolve => setTimeout(resolve, frameDuration));
         }
         
-        loading.textContent = 'Encoding MP4...';
-        
-        // Run FFmpeg to create MP4
-        await ffmpeg.exec([
-            '-framerate', String(state.fps),
-            '-i', 'frame_%04d.png',
-            '-c:v', 'libx264',
-            '-pix_fmt', 'yuv420p',
-            '-preset', 'medium',
-            '-crf', '23',
-            'output.mp4'
-        ]);
-        
-        // Read the output file
-        const data = await ffmpeg.readFile('output.mp4');
-        
-        // Create download
-        const blob = new Blob([data.buffer], { type: 'video/mp4' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `animation-${Date.now()}.mp4`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(link.href);
-        
-        if (document.body.contains(loading)) {
-            document.body.removeChild(loading);
-        }
-        exportBtn.disabled = false;
-        exportBtn.innerHTML = originalText;
+        // Stop recording
+        loading.textContent = 'Finalizing video...';
+        mediaRecorder.stop();
         
     } catch (err) {
-        console.error('MP4 export error:', err);
-        showAlert('Failed to export MP4: ' + err.message + '\n\nTry using PNG Sequence export instead, which works offline.', 'Export Error');
+        console.error('Video export error:', err);
+        showAlert('Failed to record video: ' + err.message + '\n\nTry using PNG Sequence or GIF export instead.', 'Export Error');
         if (document.body.contains(loading)) {
             document.body.removeChild(loading);
         }
