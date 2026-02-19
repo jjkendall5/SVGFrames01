@@ -190,6 +190,22 @@ body {
     overflow: visible; /* Allow dropdown menu to show */
 }
 
+/* Auto-save indicator */
+.auto-save-indicator {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    margin-right: var(--space-2);
+    user-select: none;
+    white-space: nowrap;
+}
+
+.auto-save-indicator.visible {
+    opacity: 1;
+}
+
 .header-btn {
     height: 32px;
     padding: 0 var(--space-3);
@@ -391,6 +407,16 @@ body {
 .tool-btn.active {
     background: var(--accent-bg);
     color: var(--accent);
+}
+
+/* Clear button - warning color */
+.clear-btn {
+    color: #ef4444;
+}
+
+.clear-btn:hover {
+    background: #fef2f2;
+    color: #dc2626;
 }
 
 .constraint-btn.active {

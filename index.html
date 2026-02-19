@@ -37,6 +37,7 @@
             </div>
         </div>
         <div class="header-right">
+            <span id="autoSaveIndicator" class="auto-save-indicator">Auto-saved</span>
             <button id="undoBtn" class="header-btn" title="Undo (Ctrl+Z)">
                 <span class="icon">↶</span>
                 <span class="label">Undo</span>
@@ -89,6 +90,17 @@
                         <path d="M7 8l6-6"/>
                     </svg>
                     <span class="tool-label">Eraser</span>
+                </button>
+            </div>
+
+            <div class="tool-divider"></div>
+
+            <div class="tool-section">
+                <button id="clearBtn" class="tool-btn clear-btn" title="Clear Canvas">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 7h12M7 7V4a1 1 0 011-1h4a1 1 0 011 1v3M5 7l1 10a1 1 0 001 1h6a1 1 0 001-1l1-10"/>
+                    </svg>
+                    <span class="tool-label">Clear</span>
                 </button>
             </div>
 

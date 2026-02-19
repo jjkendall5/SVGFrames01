@@ -60,6 +60,9 @@ function init() {
     // Start playback watchdog (checks for stuck states every second)
     startPlaybackWatchdog();
     
+    // Start auto-save (every 30 seconds)
+    startAutoSave();
+    
     setupEventListeners();
     setupKeyboardShortcuts();
     loadFromLocalStorage();
@@ -103,6 +106,40 @@ function startPlaybackWatchdog() {
             stopPlayback();
         }
     }, 1000); // Check every second
+}
+
+// Auto-save functionality
+let autoSaveInterval = null;
+
+function startAutoSave() {
+    // Auto-save every 30 seconds
+    autoSaveInterval = setInterval(() => {
+        saveToLocalStorage();
+        showAutoSaveIndicator();
+    }, 30000); // 30 seconds
+    
+    console.log('Auto-save enabled (every 30 seconds)');
+}
+
+function showAutoSaveIndicator() {
+    const indicator = document.getElementById('autoSaveIndicator');
+    if (!indicator) return;
+    
+    // Get current time
+    const now = new Date();
+    const timeString = now.toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit' 
+    });
+    
+    // Update text and show
+    indicator.textContent = `Auto-saved ${timeString}`;
+    indicator.classList.add('visible');
+    
+    // Fade out after 2 seconds
+    setTimeout(() => {
+        indicator.classList.remove('visible');
+    }, 2000);
 }
 
 // Fix iOS Safari viewport height (URL bar causes issues with 100vh)
@@ -162,6 +199,9 @@ function setupEventListeners() {
     // Tool selection
     document.getElementById('penTool').addEventListener('click', () => selectTool('pen'));
     document.getElementById('eraserTool').addEventListener('click', () => selectTool('eraser'));
+    
+    // Clear canvas button
+    document.getElementById('clearBtn').addEventListener('click', clearCanvas);
     
     // Constraint mode toggle with long-press for circle mode
     const constraintBtn = document.getElementById('constraintToggle');
@@ -581,6 +621,20 @@ function handleKeyboardShortcut(e) {
         return;
     }
     
+    // B key - switch to pen/brush tool
+    if (e.key === 'b' || e.key === 'B') {
+        e.preventDefault();
+        selectTool('pen');
+        return;
+    }
+    
+    // E key - switch to eraser tool
+    if (e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        selectTool('eraser');
+        return;
+    }
+    
     // Detect platform: macOS uses Cmd, Windows/Linux use Ctrl
     const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
     const modifier = isMac ? e.metaKey : e.ctrlKey;
@@ -920,8 +974,17 @@ function startDrawing(e) {
     // Create new path element
     state.currentPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     
+    // ERASER MODE: Draw path that will be used to cut through existing paths
+    if (state.tool === 'eraser') {
+        state.currentPath.setAttribute('fill', 'none');
+        state.currentPath.setAttribute('stroke', state.backgroundColor || '#ffffff');
+        state.currentPath.setAttribute('stroke-width', state.strokeSize * 3);
+        state.currentPath.setAttribute('stroke-linecap', 'round');
+        state.currentPath.setAttribute('stroke-linejoin', 'round');
+        state.currentPath.setAttribute('opacity', '0.5'); // Semi-transparent preview
+    }
     // Dual-mode brush: tapered (filled) vs uniform (stroked)
-    if (state.taper > 0 && state.tool === 'pen') {
+    else if (state.taper > 0 && state.tool === 'pen') {
         // TAPERED MODE: Filled outline path
         state.currentPath.setAttribute('fill', state.strokeColor);
         state.currentPath.setAttribute('stroke', 'none');
@@ -937,11 +1000,6 @@ function startDrawing(e) {
         state.currentPath.setAttribute('stroke-width', strokeWidth);
         state.currentPath.setAttribute('stroke-linecap', 'round');
         state.currentPath.setAttribute('stroke-linejoin', 'round');
-    }
-    
-    if (state.tool === 'eraser') {
-        state.currentPath.setAttribute('stroke', 'white');
-        state.currentPath.setAttribute('stroke-width', state.strokeSize * 3);
     }
     
     // Add to the current layer's group
@@ -1214,22 +1272,32 @@ function stopDrawing(e) {
         const saveFrameIndex = currentLayer && currentLayer.isBackground ? 0 : state.currentFrameIndex;
         
         if (currentLayer && currentLayer.frames[saveFrameIndex]) {
-            // Store the path data (with fill for tapered strokes)
-            const pathData = {
-                d: state.currentPath.getAttribute('d'),
-                stroke: state.currentPath.getAttribute('stroke'),
-                strokeWidth: state.currentPath.getAttribute('stroke-width'),
-                fill: state.currentPath.getAttribute('fill'), // NEW: Store fill for tapered strokes
-                tool: state.tool
-            };
-            
-            currentLayer.frames[saveFrameIndex].paths.push(pathData);
+            // ERASER MODE: Apply eraser effect to existing paths
+            if (state.tool === 'eraser') {
+                applyEraserCut(currentLayer.frames[saveFrameIndex], state.currentPath);
+                // Remove the eraser path preview
+                if (state.currentPath.parentNode) {
+                    state.currentPath.parentNode.removeChild(state.currentPath);
+                }
+            } else {
+                // PEN MODE: Store the path data (with fill for tapered strokes)
+                const pathData = {
+                    d: state.currentPath.getAttribute('d'),
+                    stroke: state.currentPath.getAttribute('stroke'),
+                    strokeWidth: state.currentPath.getAttribute('stroke-width'),
+                    fill: state.currentPath.getAttribute('fill'), // NEW: Store fill for tapered strokes
+                    tool: state.tool
+                };
+                
+                currentLayer.frames[saveFrameIndex].paths.push(pathData);
+            }
             
             // Clear redo stack on new action
             state.redoStack = [];
             
             updateFrameList();
             saveToLocalStorage();
+            showAutoSaveIndicator(); // Show save confirmation
         }
     }
     
@@ -1237,6 +1305,30 @@ function stopDrawing(e) {
     state.currentPoints = [];
     state.startPoint = null; // Clear start point
     state.lastPointerEvent = null; // Clear last event
+}
+
+// Apply eraser cut - save eraser stroke as a background-colored path
+function applyEraserCut(frame, eraserPath) {
+    if (!frame || !frame.paths || !eraserPath) return;
+    
+    const eraserPathD = eraserPath.getAttribute('d');
+    if (!eraserPathD) return;
+    
+    // Instead of deleting paths, save the eraser stroke as a background-colored path
+    // This creates a "pencil eraser" effect - it covers what's underneath
+    const eraserData = {
+        d: eraserPathD,
+        stroke: state.backgroundColor || '#ffffff',
+        strokeWidth: state.strokeSize * 3,
+        fill: 'none',
+        tool: 'eraser'
+    };
+    
+    // Add eraser stroke to paths (it will be rendered on top, covering what's below)
+    frame.paths.push(eraserData);
+    
+    // Re-render the frame
+    renderFrame();
 }
 
 function getSvgPoint(e) {
@@ -1840,6 +1932,38 @@ function removeHoldFrame(frameIndex) {
         updateFrameCounter();
         saveToLocalStorage();
     }
+}
+
+// Clear current frame/layer
+function clearCanvas() {
+    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    if (!currentLayer) return;
+    
+    const frameIndex = currentLayer.isBackground ? 0 : state.currentFrameIndex;
+    const frame = currentLayer.frames[frameIndex];
+    
+    if (!frame || !frame.paths || frame.paths.length === 0) {
+        showAlert('Canvas is already empty!', 'Nothing to Clear');
+        return;
+    }
+    
+    showConfirm(
+        `Clear all content from current ${currentLayer.isBackground ? 'background layer' : 'frame'}?`,
+        'Clear Canvas',
+        () => {
+            // Save state for undo
+            saveStateForUndo();
+            
+            // Clear all paths
+            frame.paths = [];
+            
+            // Re-render
+            renderFrame();
+            updateFrameList();
+            saveToLocalStorage();
+            showAutoSaveIndicator();
+        }
+    );
 }
 
 function deleteFrame() {
