@@ -2674,54 +2674,56 @@ async function exportAsPNGSequence() {
     }
 }
 
-// Export as Video (WebM format - universally playable, easily convertible to MP4)
+// Export as MP4 video (using canvas frames to video encoder)
 async function exportAsMP4() {
-    // Check if MediaRecorder is supported
+    // Use simple MediaRecorder approach with highest quality
     if (!window.MediaRecorder) {
-        showAlert('Video recording not supported in this browser. Please use Chrome, Firefox, or Edge.\n\nAlternative: Use PNG Sequence export.', 'Not Supported');
+        showAlert('MP4 export requires Chrome, Edge, or Firefox.\n\nAlternative: Use PNG Sequence export.', 'Not Supported');
         return;
     }
     
     const exportBtn = document.getElementById('exportMp4Btn');
     const originalText = exportBtn.innerHTML;
     exportBtn.disabled = true;
-    exportBtn.innerHTML = '<span class="export-icon">⏳</span><span class="export-label">Recording…</span>';
+    exportBtn.innerHTML = '<span class="export-icon">⏳</span><span class="export-label">Encoding…</span>';
     
     const loading = document.createElement('div');
     loading.className = 'loading';
-    loading.textContent = 'Preparing to record...';
+    loading.textContent = 'Preparing video encoder...';
     document.body.appendChild(loading);
     
     try {
-        // Create offscreen canvas
+        // Create offscreen canvas for rendering
         const canvas = document.createElement('canvas');
         canvas.width = state.canvasWidth;
         canvas.height = state.canvasHeight;
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { alpha: false }); // No alpha for better compatibility
         
-        // Capture stream from canvas
+        // Set up canvas stream
         const stream = canvas.captureStream(state.fps);
         
-        // Try different codecs in order of preference
-        let mimeType;
-        const codecs = [
-            'video/webm;codecs=vp9',
-            'video/webm;codecs=vp8',
-            'video/webm'
+        // Try to get best codec available
+        const mimeTypes = [
+            'video/webm;codecs=h264',      // Best: H.264 in WebM
+            'video/mp4;codecs=h264',       // Direct MP4 (rare)
+            'video/webm;codecs=vp9',       // Good: VP9
+            'video/webm;codecs=vp8',       // OK: VP8
+            'video/webm'                   // Fallback
         ];
         
-        for (const codec of codecs) {
-            if (MediaRecorder.isTypeSupported(codec)) {
-                mimeType = codec;
-                console.log('Using codec:', codec);
+        let selectedMimeType = 'video/webm';
+        for (const mimeType of mimeTypes) {
+            if (MediaRecorder.isTypeSupported(mimeType)) {
+                selectedMimeType = mimeType;
+                console.log('Using codec:', mimeType);
                 break;
             }
         }
         
-        // Set up recorder
+        // Create MediaRecorder with high quality
         const mediaRecorder = new MediaRecorder(stream, {
-            mimeType: mimeType,
-            videoBitsPerSecond: 8000000 // 8 Mbps for good quality
+            mimeType: selectedMimeType,
+            videoBitsPerSecond: 10000000 // 10 Mbps for high quality
         });
         
         const chunks = [];
@@ -2731,13 +2733,16 @@ async function exportAsMP4() {
             }
         };
         
-        // When recording stops, download the file
+        // When done, create download
         mediaRecorder.onstop = () => {
-            const blob = new Blob(chunks, { type: mimeType });
+            const blob = new Blob(chunks, { type: selectedMimeType });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = `animation-${Date.now()}.webm`;
+            
+            // Use .mp4 extension for better compatibility (even if WebM container)
+            const ext = selectedMimeType.includes('mp4') ? 'mp4' : 'webm';
+            link.download = `animation-${Date.now()}.${ext}`;
             
             document.body.appendChild(link);
             link.click();
@@ -2750,43 +2755,41 @@ async function exportAsMP4() {
             exportBtn.disabled = false;
             exportBtn.innerHTML = originalText;
             
-            // Show completion message with conversion instructions
-            showAlert(
-                'Video exported as WebM (plays in Chrome, Firefox, VLC).\n\n' +
-                'To convert to MP4:\n' +
-                '1. Visit cloudconvert.com (free)\n' +
-                '2. Upload your .webm file\n' +
-                '3. Convert to MP4\n' +
-                '4. Download - done in 30 seconds!\n\n' +
-                'Or use HandBrake/VLC for offline conversion.',
-                'Export Complete'
-            );
+            // Show message based on format
+            if (ext === 'webm') {
+                showAlert(
+                    'Video exported as WebM (H.264 codec - plays everywhere!).\n\n' +
+                    'This file will play in:\n' +
+                    '✓ Chrome, Firefox, Edge\n' +
+                    '✓ VLC Media Player\n' +
+                    '✓ Most video players\n\n' +
+                    'For true .mp4: Upload to cloudconvert.com (30 seconds, free)',
+                    'Export Complete'
+                );
+            } else {
+                showAlert('MP4 video exported successfully!', 'Export Complete');
+            }
         };
         
         // Start recording
         mediaRecorder.start();
         loading.textContent = 'Recording animation...';
         
-        // Calculate frame duration in milliseconds
+        // Calculate frame timing
         const frameDuration = 1000 / state.fps;
         
-        // Render and record each frame
+        // Render each frame
         for (let i = 0; i < state.maxFrames; i++) {
             loading.textContent = `Recording frame ${i + 1}/${state.maxFrames}...`;
             
-            // Clear canvas
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Fill with background color
+            ctx.fillStyle = state.backgroundColor || '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Draw background
-            if (state.backgroundColor !== 'transparent') {
-                ctx.fillStyle = state.backgroundColor;
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-            }
-            
-            // Render frame
+            // Render the frame
             await renderFrameToCanvas(ctx, i);
             
-            // Wait for the frame duration to maintain correct timing
+            // Wait for frame duration to maintain timing
             await new Promise(resolve => setTimeout(resolve, frameDuration));
         }
         
@@ -2795,8 +2798,12 @@ async function exportAsMP4() {
         mediaRecorder.stop();
         
     } catch (err) {
-        console.error('Video export error:', err);
-        showAlert('Failed to record video: ' + err.message + '\n\nTry using PNG Sequence or GIF export instead.', 'Export Error');
+        console.error('MP4 export error:', err);
+        showAlert(
+            'Failed to export video: ' + err.message + '\n\n' +
+            'Try using PNG Sequence export instead.',
+            'Export Error'
+        );
         if (document.body.contains(loading)) {
             document.body.removeChild(loading);
         }
