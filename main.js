@@ -2674,136 +2674,237 @@ async function exportAsPNGSequence() {
     }
 }
 
-// Export as MP4 video (using canvas frames to video encoder)
+// Export as MP4 video (using WebCodecs + mp4-muxer for TRUE MP4 files)
 async function exportAsMP4() {
-    // Use simple MediaRecorder approach with highest quality
-    if (!window.MediaRecorder) {
-        showAlert('MP4 export requires Chrome, Edge, or Firefox.\n\nAlternative: Use PNG Sequence export.', 'Not Supported');
+    // Check for WebCodecs support (Chrome 94+, Edge 94+)
+    if (!window.VideoEncoder || !window.VideoFrame) {
+        showAlert(
+            'MP4 export requires Chrome 94+ or Edge 94+.\n\n' +
+            'Your browser doesn\'t support WebCodecs.\n\n' +
+            'Alternative: Use PNG Sequence export.',
+            'Not Supported'
+        );
         return;
     }
     
     const exportBtn = document.getElementById('exportMp4Btn');
     const originalText = exportBtn.innerHTML;
     exportBtn.disabled = true;
-    exportBtn.innerHTML = '<span class="export-icon">⏳</span><span class="export-label">Encoding…</span>';
+    exportBtn.innerHTML = '<span class="export-icon">⏳</span><span class="export-label">Loading…</span>';
     
     const loading = document.createElement('div');
     loading.className = 'loading';
-    loading.textContent = 'Preparing video encoder...';
+    loading.textContent = 'Loading MP4 encoder...';
     document.body.appendChild(loading);
     
     try {
-        // Create offscreen canvas for rendering
+        // Import mp4-muxer from esm.sh (the CDN that actually works!)
+        console.log('Importing mp4-muxer from esm.sh...');
+        const { Muxer, ArrayBufferTarget } = await import('https://esm.sh/mp4-muxer@5.1.1');
+        console.log('✅ mp4-muxer loaded successfully');
+        
+        loading.textContent = 'Preparing MP4 encoder...';
+        
+        // Create canvas for rendering
         const canvas = document.createElement('canvas');
         canvas.width = state.canvasWidth;
         canvas.height = state.canvasHeight;
-        const ctx = canvas.getContext('2d', { alpha: false }); // No alpha for better compatibility
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
         
-        // Set up canvas stream
-        const stream = canvas.captureStream(state.fps);
-        
-        // Try to get best codec available
-        const mimeTypes = [
-            'video/webm;codecs=h264',      // Best: H.264 in WebM
-            'video/mp4;codecs=h264',       // Direct MP4 (rare)
-            'video/webm;codecs=vp9',       // Good: VP9
-            'video/webm;codecs=vp8',       // OK: VP8
-            'video/webm'                   // Fallback
-        ];
-        
-        let selectedMimeType = 'video/webm';
-        for (const mimeType of mimeTypes) {
-            if (MediaRecorder.isTypeSupported(mimeType)) {
-                selectedMimeType = mimeType;
-                console.log('Using codec:', mimeType);
-                break;
-            }
-        }
-        
-        // Create MediaRecorder with high quality
-        const mediaRecorder = new MediaRecorder(stream, {
-            mimeType: selectedMimeType,
-            videoBitsPerSecond: 10000000 // 10 Mbps for high quality
+        // Create MP4 muxer
+        console.log('Creating MP4 muxer...');
+        const muxer = new Muxer({
+            target: new ArrayBufferTarget(),
+            video: {
+                codec: 'avc',
+                width: state.canvasWidth,
+                height: state.canvasHeight
+            },
+            fastStart: 'in-memory'
         });
         
-        const chunks = [];
-        mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-                chunks.push(e.data);
+        // Configure video encoder
+        const videoEncoder = new VideoEncoder({
+            output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+            error: (e) => {
+                console.error('Encoder error:', e);
+                throw e;
             }
-        };
+        });
         
-        // When done, create download
-        mediaRecorder.onstop = () => {
-            const blob = new Blob(chunks, { type: selectedMimeType });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            
-            // Use .mp4 extension for better compatibility (even if WebM container)
-            const ext = selectedMimeType.includes('mp4') ? 'mp4' : 'webm';
-            link.download = `animation-${Date.now()}.${ext}`;
-            
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-            
-            if (document.body.contains(loading)) {
-                document.body.removeChild(loading);
-            }
-            exportBtn.disabled = false;
-            exportBtn.innerHTML = originalText;
-            
-            // Show message based on format
-            if (ext === 'webm') {
-                showAlert(
-                    'Video exported as WebM (H.264 codec - plays everywhere!).\n\n' +
-                    'This file will play in:\n' +
-                    '✓ Chrome, Firefox, Edge\n' +
-                    '✓ VLC Media Player\n' +
-                    '✓ Most video players\n\n' +
-                    'For true .mp4: Upload to cloudconvert.com (30 seconds, free)',
-                    'Export Complete'
-                );
-            } else {
-                showAlert('MP4 video exported successfully!', 'Export Complete');
-            }
-        };
+        videoEncoder.configure({
+            codec: 'avc1.42001f', // H.264 Baseline Level 3.1
+            width: state.canvasWidth,
+            height: state.canvasHeight,
+            bitrate: 5_000_000, // 5 Mbps
+            framerate: state.fps,
+            latencyMode: 'quality'
+        });
         
-        // Start recording
-        mediaRecorder.start();
-        loading.textContent = 'Recording animation...';
+        console.log('Encoder configured, starting encoding...');
         
         // Calculate frame timing
-        const frameDuration = 1000 / state.fps;
+        const frameDuration = 1_000_000 / state.fps; // microseconds
         
-        // Render each frame
+        // Encode each frame
         for (let i = 0; i < state.maxFrames; i++) {
-            loading.textContent = `Recording frame ${i + 1}/${state.maxFrames}...`;
+            loading.textContent = `Encoding frame ${i + 1}/${state.maxFrames}...`;
             
-            // Fill with background color
+            // Clear and fill background
             ctx.fillStyle = state.backgroundColor || '#ffffff';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
             // Render the frame
             await renderFrameToCanvas(ctx, i);
             
-            // Wait for frame duration to maintain timing
-            await new Promise(resolve => setTimeout(resolve, frameDuration));
+            // Create video frame from canvas
+            const videoFrame = new VideoFrame(canvas, {
+                timestamp: i * frameDuration,
+                duration: frameDuration
+            });
+            
+            // Encode (keyframe every 30 frames for seeking)
+            const isKeyFrame = i % 30 === 0;
+            videoEncoder.encode(videoFrame, { keyFrame: isKeyFrame });
+            videoFrame.close();
+            
+            // Allow UI to update every 5 frames
+            if (i % 5 === 0) {
+                await new Promise(resolve => setTimeout(resolve, 1));
+            }
         }
         
-        // Stop recording
-        loading.textContent = 'Finalizing video...';
-        mediaRecorder.stop();
+        // Flush encoder
+        console.log('Flushing encoder...');
+        loading.textContent = 'Finalizing MP4...';
+        await videoEncoder.flush();
+        videoEncoder.close();
+        
+        console.log('Finalizing muxer...');
+        
+        // Finalize muxer
+        muxer.finalize();
+        
+        // Get the MP4 file data
+        const mp4Buffer = muxer.target.buffer;
+        
+        console.log('✅ MP4 created:', mp4Buffer.byteLength, 'bytes');
+        
+        // Verify it's actually MP4 (should start with 'ftyp')
+        const header = new Uint8Array(mp4Buffer.slice(4, 8));
+        const headerType = String.fromCharCode(...header);
+        console.log('File type:', headerType, '(should be "ftyp")');
+        
+        // Create download
+        const blob = new Blob([mp4Buffer], { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `animation-${Date.now()}.mp4`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        if (document.body.contains(loading)) {
+            document.body.removeChild(loading);
+        }
+        exportBtn.disabled = false;
+        exportBtn.innerHTML = originalText;
+        
+        console.log('✅ MP4 export complete!');
+        
+        showAlert('MP4 video exported successfully!\n\nTrue .mp4 file with H.264 codec.', 'Export Complete');
         
     } catch (err) {
         console.error('MP4 export error:', err);
-        showAlert(
-            'Failed to export video: ' + err.message + '\n\n' +
-            'Try using PNG Sequence export instead.',
-            'Export Error'
-        );
+        console.error('Stack:', err.stack);
+        
+        let errorMsg = 'Failed to export MP4: ' + err.message;
+        
+        if (err.message.includes('import') || err.message.includes('module')) {
+            errorMsg += '\n\nModule loading error.\n\nTry: PNG Sequence export instead.';
+        } else if (err.message.includes('codec') || err.message.includes('not supported')) {
+            errorMsg += '\n\nH.264 encoding not supported.\n\nTry: Chrome or Edge (latest version)';
+        }
+        
+        showAlert(errorMsg, 'Export Error');
+        
+        if (document.body.contains(loading)) {
+            document.body.removeChild(loading);
+        }
+        exportBtn.disabled = false;
+        exportBtn.innerHTML = originalText;
+    }
+}
+        for (let i = 0; i < state.maxFrames; i++) {
+            loading.textContent = `Encoding frame ${i + 1}/${state.maxFrames}...`;
+            
+            // Clear and fill background
+            ctx.fillStyle = state.backgroundColor || '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Render the frame
+            await renderFrameToCanvas(ctx, i);
+            
+            // Create video frame from canvas
+            const videoFrame = new VideoFrame(canvas, {
+                timestamp: i * frameDuration,
+                duration: frameDuration
+            });
+            
+            // Encode (keyframe every 30 frames for seeking)
+            const isKeyFrame = i % 30 === 0;
+            videoEncoder.encode(videoFrame, { keyFrame: isKeyFrame });
+            videoFrame.close();
+            
+            // Allow UI to update every 5 frames
+            if (i % 5 === 0) {
+                await new Promise(resolve => setTimeout(resolve, 1));
+            }
+        }
+        
+        // Flush encoder
+        loading.textContent = 'Finalizing MP4...';
+        await videoEncoder.flush();
+        videoEncoder.close();
+        
+        // Finalize muxer
+        muxer.finalize();
+        
+        // Get the MP4 file data
+        const mp4Buffer = muxer.target.buffer;
+        
+        // Create download
+        const blob = new Blob([mp4Buffer], { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `animation-${Date.now()}.mp4`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        if (document.body.contains(loading)) {
+            document.body.removeChild(loading);
+        }
+        exportBtn.disabled = false;
+        exportBtn.innerHTML = originalText;
+        
+        showAlert('MP4 video exported successfully!\n\nTrue MP4 file with H.264 codec.', 'Export Complete');
+        
+    } catch (err) {
+        console.error('MP4 export error:', err);
+        
+        let errorMsg = 'Failed to export MP4: ' + err.message;
+        
+        if (err.message.includes('codec') || err.message.includes('not supported')) {
+            errorMsg += '\n\nYour browser doesn\'t support H.264 encoding.\n\nTry:\n- Chrome or Edge (latest version)\n- PNG Sequence export instead';
+        }
+        
+        showAlert(errorMsg, 'Export Error');
+        
         if (document.body.contains(loading)) {
             document.body.removeChild(loading);
         }
