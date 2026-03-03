@@ -42,8 +42,29 @@ const state = {
     isPlaying: false,
     playInterval: null,
     fps: 12,
+    frameClipboard: null,
     undoStack: [],
-    redoStack: []
+    redoStack: [],
+    selection: {
+        indices: [],       // Array of selected path indices in current frame
+        bbox: null,        // {x, y, width, height} bounding box
+        isDragging: false,
+        isResizing: false,
+        isRotating: false,
+        isMarquee: false,
+        dragStart: null,
+        resizeHandle: null,
+        resizeOrigin: null,
+        rotateStart: null,
+        rotation: 0,
+        marqueeStart: null,
+        originalPaths: null, // Snapshot for transform operations
+        anchor: null,      // {x, y} pivot point for rotation
+        anchorLocked: false, // true if user repositioned anchor
+        isDraggingAnchor: false,
+        rotateAnchor: null, // Fixed pivot during rotation drag
+        _anchorAtDragStart: null
+    }
 };
 
 // ==================== INITIALIZATION ====================
@@ -199,6 +220,7 @@ function setupEventListeners() {
     // Tool selection
     document.getElementById('penTool').addEventListener('click', () => selectTool('pen'));
     document.getElementById('eraserTool').addEventListener('click', () => selectTool('eraser'));
+    document.getElementById('selectTool').addEventListener('click', () => selectTool('select'));
     
     // Clear canvas button
     document.getElementById('clearBtn').addEventListener('click', clearCanvas);
@@ -307,11 +329,14 @@ function setupEventListeners() {
 
     // Layer controls
     document.getElementById('addLayerBtn').addEventListener('click', addLayer);
+    document.getElementById('duplicateLayerBtn').addEventListener('click', duplicateLayer);
 
     // Frame controls
     document.getElementById('addFrameBtn').addEventListener('click', addFrame);
     document.getElementById('duplicateFrameBtn').addEventListener('click', duplicateFrame);
     document.getElementById('deleteFrameBtn').addEventListener('click', deleteFrame);
+    document.getElementById('copyFrameBtn').addEventListener('click', copyFrame);
+    document.getElementById('pasteFrameBtn').addEventListener('click', pasteFrame);
 
     // Onion skin toggle
     const onionToggleBtn = document.getElementById('onionSkinToggle');
@@ -510,6 +535,19 @@ function setupEventListeners() {
 
     // Auto-save every 10 seconds
     setInterval(saveToLocalStorage, 10000);
+
+    // Keyboard shortcuts help panel
+    document.getElementById('shortcutsBtn').addEventListener('click', toggleShortcutsPanel);
+    document.getElementById('shortcutsCloseBtn').addEventListener('click', closeShortcutsPanel);
+    document.querySelector('.shortcuts-backdrop').addEventListener('click', closeShortcutsPanel);
+    
+    // Detect Mac and swap modifier labels
+    const isMacPlatform = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    if (isMacPlatform) {
+        document.querySelectorAll('.shortcut-keys kbd.mod').forEach(kbd => {
+            kbd.textContent = '⌘';
+        });
+    }
 }
 
 // ==================== KEYBOARD SHORTCUTS ====================
@@ -593,11 +631,23 @@ function handleKeyboardShortcut(e) {
         return;
     }
     
-    // Escape key - stop playback (emergency stop)
+    // Escape key - close panels, stop playback, or deselect
     if (e.key === 'Escape') {
+        // Close shortcuts panel if open
+        const shortcutsPanel = document.getElementById('shortcutsPanel');
+        if (shortcutsPanel && shortcutsPanel.style.display !== 'none') {
+            e.preventDefault();
+            closeShortcutsPanel();
+            return;
+        }
         if (state.isPlaying) {
             e.preventDefault();
             stopPlayback();
+            return;
+        }
+        if (state.tool === 'select' && state.selection && state.selection.indices.length > 0) {
+            e.preventDefault();
+            clearSelection();
             return;
         }
     }
@@ -635,6 +685,27 @@ function handleKeyboardShortcut(e) {
         return;
     }
     
+    // V key - switch to select tool
+    if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault();
+        selectTool('select');
+        return;
+    }
+    
+    // ? key - toggle shortcuts panel
+    if (e.key === '?') {
+        e.preventDefault();
+        toggleShortcutsPanel();
+        return;
+    }
+    
+    // Delete/Backspace - delete selected paths
+    if ((e.key === 'Delete' || e.key === 'Backspace') && state.tool === 'select' && state.selection && state.selection.indices.length > 0) {
+        e.preventDefault();
+        deleteSelectedPaths();
+        return;
+    }
+    
     // Detect platform: macOS uses Cmd, Windows/Linux use Ctrl
     const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
     const modifier = isMac ? e.metaKey : e.ctrlKey;
@@ -643,6 +714,29 @@ function handleKeyboardShortcut(e) {
     if (modifier && e.key === 'z' && !e.shiftKey) {
         e.preventDefault(); // Prevent browser undo
         undo();
+        return;
+    }
+    
+    // Select All: Cmd/Ctrl + A (only in select mode)
+    if (modifier && (e.key === 'a' || e.key === 'A') && state.tool === 'select') {
+        e.preventDefault();
+        selectAllPaths();
+        return;
+    }
+    
+    // Copy Frame: Cmd/Ctrl + C (not when select tool has active selection)
+    if (modifier && (e.key === 'c' || e.key === 'C')) {
+        if (!(state.tool === 'select' && state.selection && state.selection.indices.length > 0)) {
+            e.preventDefault();
+            copyFrame();
+            return;
+        }
+    }
+    
+    // Paste Frame: Cmd/Ctrl + V
+    if (modifier && (e.key === 'v' || e.key === 'V') && !e.shiftKey) {
+        e.preventDefault();
+        pasteFrame();
         return;
     }
     
@@ -668,12 +762,39 @@ function addLayer() {
         id: `layer-${state.layerIdCounter}`,
         name: `Layer ${state.layerIdCounter}`,
         visible: true,
+        opacity: 1,
         frames: [{ paths: [] }] // Start with one empty frame
     };
     
     state.layers.push(newLayer);
     state.currentLayerId = newLayer.id;
     
+    updateLayerList();
+    updateFrameList();
+    renderFrame();
+    saveToLocalStorage();
+}
+
+function duplicateLayer() {
+    const sourceLayer = state.layers.find(l => l.id === state.currentLayerId);
+    if (!sourceLayer) return;
+    
+    state.layerIdCounter++;
+    const newLayer = {
+        id: 'layer-' + state.layerIdCounter,
+        name: sourceLayer.name + ' copy',
+        visible: true,
+        opacity: sourceLayer.opacity !== undefined ? sourceLayer.opacity : 1,
+        isBackground: sourceLayer.isBackground || false,
+        frames: JSON.parse(JSON.stringify(sourceLayer.frames))
+    };
+    
+    // Insert directly above the source layer
+    const sourceIndex = state.layers.indexOf(sourceLayer);
+    state.layers.splice(sourceIndex + 1, 0, newLayer);
+    state.currentLayerId = newLayer.id;
+    
+    updateMaxFrames();
     updateLayerList();
     updateFrameList();
     renderFrame();
@@ -878,12 +999,52 @@ function updateLayerList() {
             }
         });
         
-        layerItem.appendChild(checkbox);
-        layerItem.appendChild(reorderControls);
-        layerItem.appendChild(nameSpan);
-        layerItem.appendChild(bgLabel);
-        layerItem.appendChild(frameCount);
-        layerItem.appendChild(deleteBtn);
+        // Opacity control
+        const opacityWrap = document.createElement('div');
+        opacityWrap.className = 'layer-opacity-wrap';
+        opacityWrap.addEventListener('click', (e) => e.stopPropagation());
+        
+        const opacityVal = document.createElement('span');
+        opacityVal.className = 'layer-opacity-value';
+        const currentOpacity = layer.opacity !== undefined ? layer.opacity : 1;
+        opacityVal.textContent = Math.round(currentOpacity * 100) + '%';
+        
+        const opacitySlider = document.createElement('input');
+        opacitySlider.type = 'range';
+        opacitySlider.className = 'layer-opacity-slider';
+        opacitySlider.min = '0';
+        opacitySlider.max = '100';
+        opacitySlider.step = '5';
+        opacitySlider.value = Math.round(currentOpacity * 100);
+        opacitySlider.title = 'Layer Opacity';
+        opacitySlider.addEventListener('input', (e) => {
+            e.stopPropagation();
+            const val = parseInt(e.target.value) / 100;
+            layer.opacity = val;
+            opacityVal.textContent = e.target.value + '%';
+            renderFrame();
+        });
+        opacitySlider.addEventListener('change', (e) => {
+            e.stopPropagation();
+            saveToLocalStorage();
+        });
+        opacitySlider.addEventListener('pointerdown', (e) => e.stopPropagation());
+        
+        opacityWrap.appendChild(opacitySlider);
+        opacityWrap.appendChild(opacityVal);
+        
+        // Two-row layout
+        const topRow = document.createElement('div');
+        topRow.className = 'layer-top-row';
+        topRow.appendChild(checkbox);
+        topRow.appendChild(reorderControls);
+        topRow.appendChild(nameSpan);
+        topRow.appendChild(bgLabel);
+        topRow.appendChild(frameCount);
+        topRow.appendChild(deleteBtn);
+        
+        layerItem.appendChild(topRow);
+        layerItem.appendChild(opacityWrap);
         
         layerItem.addEventListener('click', () => selectLayer(layer.id));
         layerList.appendChild(layerItem);
@@ -944,6 +1105,12 @@ function startDrawing(e) {
     e.preventDefault();
     
     if (state.isPlaying) return;
+    
+    // Select tool handles its own pointer events
+    if (state.tool === 'select') {
+        handleSelectPointerDown(e);
+        return;
+    }
     
     const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
     if (!currentLayer || !currentLayer.visible) return;
@@ -1012,6 +1179,12 @@ function startDrawing(e) {
 function draw(e) {
     // Prevent default touch behaviors
     e.preventDefault();
+    
+    // Select tool handles its own pointer events
+    if (state.tool === 'select') {
+        handleSelectPointerMove(e);
+        return;
+    }
     
     if (!state.isDrawing || !state.currentPath) return;
     
@@ -1250,6 +1423,13 @@ function createTaperedPath(points, baseWidth, taperAmount) {
 }
 
 function stopDrawing(e) {
+    // Select tool handles its own pointer events
+    if (state.tool === 'select') {
+        if (e) e.preventDefault();
+        handleSelectPointerUp(e);
+        return;
+    }
+    
     // Prevent default if event exists
     if (e) {
         e.preventDefault();
@@ -1729,6 +1909,11 @@ function renderFrame() {
         
         if (!layer.visible) {
             layerGroup.setAttribute('opacity', '0');
+        } else {
+            const layerOpacity = layer.opacity !== undefined ? layer.opacity : 1;
+            if (layerOpacity < 1) {
+                layerGroup.setAttribute('opacity', layerOpacity.toString());
+            }
         }
         
         // Get the frame to render
@@ -1789,6 +1974,12 @@ function createPathElement(pathData) {
 
 // ==================== TOOL SELECTION ====================
 function selectTool(tool) {
+    // If leaving select mode, clear selection
+    if (state.tool === 'select' && tool !== 'select') {
+        clearSelection();
+        svg.classList.remove('select-mode');
+    }
+    
     state.tool = tool;
     
     // Update UI
@@ -1797,6 +1988,9 @@ function selectTool(tool) {
         document.getElementById('penTool').classList.add('active');
     } else if (tool === 'eraser') {
         document.getElementById('eraserTool').classList.add('active');
+    } else if (tool === 'select') {
+        document.getElementById('selectTool').classList.add('active');
+        svg.classList.add('select-mode');
     }
 }
 
@@ -2145,6 +2339,9 @@ function togglePlayback() {
 function startPlayback() {
     console.log('startPlayback called'); // Debug log
     
+    // Clear any selection when playing
+    if (state.tool === 'select' && typeof clearSelection === 'function') clearSelection();
+    
     // Safety: Stop any existing playback first
     stopPlayback();
     
@@ -2381,6 +2578,8 @@ function loadFromLocalStorage() {
             // Check if data has layer-centric structure
             if ((data.version === '4.0' || data.version === '4.1' || data.version === '4.2') && data.layers && data.layers[0] && data.layers[0].frames) {
                 state.layers = data.layers;
+                // Ensure opacity exists on all layers (data migration)
+                state.layers.forEach(l => { if (l.opacity === undefined) l.opacity = 1; });
                 state.currentLayerId = data.currentLayerId || state.layers[0].id;
                 state.currentFrameIndex = data.currentFrameIndex || 0;
                 state.maxFrames = data.maxFrames || 1;
@@ -2413,6 +2612,7 @@ function resetToDefault() {
         id: 'layer-1',
         name: 'Layer 1',
         visible: true,
+        opacity: 1,
         frames: [{ paths: [] }]
     }];
     state.currentLayerId = 'layer-1';
@@ -2846,6 +3046,10 @@ async function renderFrameToCanvas(ctx, frameIndex) {
             continue;
         }
         
+        // Apply layer opacity for export
+        const layerOpacity = layer.opacity !== undefined ? layer.opacity : 1;
+        ctx.globalAlpha = layerOpacity;
+        
         // Render each path in the frame
         for (const pathData of layer.frames[frameIndex].paths) {
             ctx.strokeStyle = pathData.stroke;
@@ -2918,8 +3122,9 @@ function createCompositeSVG(frameIndex) {
     // Composite all layers at this frame index
     state.layers.forEach(layer => {
         if (layer.visible && layer.frames[frameIndex]) {
+            const layerOpacity = layer.opacity !== undefined ? layer.opacity : 1;
             svgContent += `    <!-- ${layer.name} -->\n`;
-            svgContent += `    <g id="${layer.id}">\n`;
+            svgContent += `    <g id="${layer.id}"${layerOpacity < 1 ? ` opacity="${layerOpacity}"` : ''}>\n`;
             layer.frames[frameIndex].paths.forEach(pathData => {
                 svgContent += `        <path d="${pathData.d}" fill="none" stroke="${pathData.stroke}" stroke-width="${pathData.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>\n`;
             });
@@ -2997,6 +3202,692 @@ function showDownloadModal(files) {
         document.body.removeChild(modal);
         document.body.removeChild(overlay);
     });
+}
+
+
+// ==================== FRAME COPY/PASTE ====================
+function copyFrame() {
+    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    if (!currentLayer) return;
+    
+    const frameIndex = currentLayer.isBackground ? 0 : state.currentFrameIndex;
+    const frame = currentLayer.frames[frameIndex];
+    if (!frame) return;
+    
+    state.frameClipboard = JSON.parse(JSON.stringify(frame));
+    
+    const indicator = document.getElementById('autoSaveIndicator');
+    if (indicator) {
+        indicator.textContent = 'Frame copied';
+        indicator.classList.add('visible');
+        setTimeout(function() { indicator.classList.remove('visible'); }, 1500);
+    }
+}
+
+function pasteFrame() {
+    if (!state.frameClipboard) {
+        const indicator = document.getElementById('autoSaveIndicator');
+        if (indicator) {
+            indicator.textContent = 'Nothing to paste';
+            indicator.classList.add('visible');
+            setTimeout(function() { indicator.classList.remove('visible'); }, 1500);
+        }
+        return;
+    }
+    
+    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    if (!currentLayer) return;
+    
+    saveStateForUndo();
+    
+    const frameIndex = currentLayer.isBackground ? 0 : state.currentFrameIndex;
+    const pastedFrame = JSON.parse(JSON.stringify(state.frameClipboard));
+    
+    if (currentLayer.frames[frameIndex] && currentLayer.frames[frameIndex].paths && currentLayer.frames[frameIndex].paths.length === 0) {
+        currentLayer.frames[frameIndex] = pastedFrame;
+    } else {
+        currentLayer.frames.splice(frameIndex + 1, 0, pastedFrame);
+        state.currentFrameIndex = frameIndex + 1;
+    }
+    
+    updateMaxFrames();
+    state.redoStack = [];
+    renderFrame();
+    updateFrameList();
+    updateFrameCounter();
+    saveToLocalStorage();
+    
+    const indicator = document.getElementById('autoSaveIndicator');
+    if (indicator) {
+        indicator.textContent = 'Frame pasted';
+        indicator.classList.add('visible');
+        setTimeout(function() { indicator.classList.remove('visible'); }, 1500);
+    }
+}
+
+// ==================== SELECTION TOOL ====================
+const selectionOverlay = document.getElementById('selectionOverlay');
+
+function getSelectionFrame() {
+    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    if (!currentLayer) return null;
+    const frameIndex = currentLayer.isBackground ? 0 : state.currentFrameIndex;
+    return currentLayer.frames[frameIndex] || null;
+}
+
+function getPathBBox(pathD) {
+    const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    tempPath.setAttribute('d', pathD);
+    svg.appendChild(tempPath);
+    const bbox = tempPath.getBBox();
+    svg.removeChild(tempPath);
+    return bbox;
+}
+
+function getPathDataBBox(pathData) {
+    const bbox = getPathBBox(pathData.d);
+    const sw = parseFloat(pathData.strokeWidth) || 0;
+    const half = sw / 2;
+    return {
+        x: bbox.x - half,
+        y: bbox.y - half,
+        width: bbox.width + sw,
+        height: bbox.height + sw
+    };
+}
+
+function getCombinedBBox(frame, indices) {
+    if (!frame || indices.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const idx of indices) {
+        if (idx >= frame.paths.length) continue;
+        const bbox = getPathDataBBox(frame.paths[idx]);
+        minX = Math.min(minX, bbox.x);
+        minY = Math.min(minY, bbox.y);
+        maxX = Math.max(maxX, bbox.x + bbox.width);
+        maxY = Math.max(maxY, bbox.y + bbox.height);
+    }
+    if (minX === Infinity) return null;
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+function hitTestPath(pathData, point, tolerance) {
+    const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    tempPath.setAttribute('d', pathData.d);
+    svg.appendChild(tempPath);
+    const totalLen = tempPath.getTotalLength();
+    const sw = parseFloat(pathData.strokeWidth) || 2;
+    const hitDist = Math.max(tolerance, sw * 1.5);
+    const steps = Math.max(20, Math.ceil(totalLen / 4));
+    let hit = false;
+    for (let i = 0; i <= steps; i++) {
+        const pt = tempPath.getPointAtLength((i / steps) * totalLen);
+        const dx = pt.x - point.x;
+        const dy = pt.y - point.y;
+        if (dx * dx + dy * dy < hitDist * hitDist) {
+            hit = true;
+            break;
+        }
+    }
+    svg.removeChild(tempPath);
+    return hit;
+}
+
+function findPathAtPoint(frame, point) {
+    if (!frame) return -1;
+    for (let i = frame.paths.length - 1; i >= 0; i--) {
+        const pathData = frame.paths[i];
+        if (!pathData.d) continue;
+        if (pathData.fill && pathData.fill !== 'none') {
+            const bbox = getPathBBox(pathData.d);
+            if (point.x >= bbox.x && point.x <= bbox.x + bbox.width &&
+                point.y >= bbox.y && point.y <= bbox.y + bbox.height) {
+                return i;
+            }
+        }
+        if (hitTestPath(pathData, point, 8)) return i;
+    }
+    return -1;
+}
+
+function clearSelection() {
+    state.selection.indices = [];
+    state.selection.bbox = null;
+    state.selection.isDragging = false;
+    state.selection.isResizing = false;
+    state.selection.isRotating = false;
+    state.selection.isMarquee = false;
+    state.selection.rotation = 0;
+    state.selection.originalPaths = null;
+    state.selection.marqueeStart = null;
+    state.selection.anchor = null;
+    state.selection.anchorLocked = false;
+    state.selection.isDraggingAnchor = false;
+    state.selection.rotateAnchor = null;
+    state.selection._anchorAtDragStart = null;
+    drawSelectionOverlay();
+}
+
+function getSelectionAnchor() {
+    const sel = state.selection;
+    if (sel.anchor) return sel.anchor;
+    // Default: bbox center
+    if (sel.bbox) {
+        return {
+            x: sel.bbox.x + sel.bbox.width / 2,
+            y: sel.bbox.y + sel.bbox.height / 2
+        };
+    }
+    // Fallback: compute from indices
+    const frame = getSelectionFrame();
+    if (frame) {
+        const bbox = getCombinedBBox(frame, sel.indices);
+        if (bbox) return { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
+    }
+    return { x: 0, y: 0 };
+}
+
+function drawSelectionOverlay() {
+    selectionOverlay.innerHTML = '';
+    const sel = state.selection;
+    if (sel.indices.length === 0 && !sel.isMarquee) return;
+
+    // Marquee rectangle
+    if (sel.isMarquee && sel.marqueeStart && sel.dragStart) {
+        const x = Math.min(sel.marqueeStart.x, sel.dragStart.x);
+        const y = Math.min(sel.marqueeStart.y, sel.dragStart.y);
+        const w = Math.abs(sel.dragStart.x - sel.marqueeStart.x);
+        const h = Math.abs(sel.dragStart.y - sel.marqueeStart.y);
+        const marquee = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        marquee.setAttribute('x', x);
+        marquee.setAttribute('y', y);
+        marquee.setAttribute('width', w);
+        marquee.setAttribute('height', h);
+        marquee.setAttribute('class', 'selection-bbox');
+        marquee.setAttribute('fill', 'rgba(37, 99, 235, 0.08)');
+        selectionOverlay.appendChild(marquee);
+        return;
+    }
+
+    if (sel.indices.length === 0) return;
+    const frame = getSelectionFrame();
+    if (!frame) return;
+
+    // Highlight selected paths
+    for (const idx of sel.indices) {
+        if (idx >= frame.paths.length) continue;
+        const pathData = frame.paths[idx];
+        const highlight = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        highlight.setAttribute('d', pathData.d);
+        highlight.setAttribute('class', 'selection-highlight');
+        const sw = parseFloat(pathData.strokeWidth) || 0;
+        highlight.setAttribute('stroke-width', sw + 4);
+        selectionOverlay.appendChild(highlight);
+    }
+
+    // Bounding box
+    sel.bbox = getCombinedBBox(frame, sel.indices);
+    if (!sel.bbox) return;
+    const b = sel.bbox;
+    const pad = 6;
+    const bx = b.x - pad, by = b.y - pad;
+    const bw = b.width + pad * 2, bh = b.height + pad * 2;
+
+    // Move area
+    const moveArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    moveArea.setAttribute('x', bx);
+    moveArea.setAttribute('y', by);
+    moveArea.setAttribute('width', bw);
+    moveArea.setAttribute('height', bh);
+    moveArea.setAttribute('class', 'selection-move-area');
+    moveArea.setAttribute('data-action', 'move');
+    selectionOverlay.appendChild(moveArea);
+
+    // Bbox outline
+    const bboxRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bboxRect.setAttribute('x', bx);
+    bboxRect.setAttribute('y', by);
+    bboxRect.setAttribute('width', bw);
+    bboxRect.setAttribute('height', bh);
+    bboxRect.setAttribute('class', 'selection-bbox');
+    selectionOverlay.appendChild(bboxRect);
+
+    // 8 resize handles
+    const hs = 7;
+    const handles = [
+        { cls: 'nw', cx: bx, cy: by },
+        { cls: 'n',  cx: bx + bw / 2, cy: by },
+        { cls: 'ne', cx: bx + bw, cy: by },
+        { cls: 'e',  cx: bx + bw, cy: by + bh / 2 },
+        { cls: 'se', cx: bx + bw, cy: by + bh },
+        { cls: 's',  cx: bx + bw / 2, cy: by + bh },
+        { cls: 'sw', cx: bx, cy: by + bh },
+        { cls: 'w',  cx: bx, cy: by + bh / 2 }
+    ];
+    for (const h of handles) {
+        const handle = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        handle.setAttribute('x', h.cx - hs / 2);
+        handle.setAttribute('y', h.cy - hs / 2);
+        handle.setAttribute('width', hs);
+        handle.setAttribute('height', hs);
+        handle.setAttribute('class', 'selection-handle ' + h.cls);
+        handle.setAttribute('data-action', 'resize');
+        handle.setAttribute('data-handle', h.cls);
+        selectionOverlay.appendChild(handle);
+    }
+
+    // Anchor point (pivot for rotation)
+    const anchor = getSelectionAnchor();
+
+    // Anchor crosshair
+    const anchorSize = 8;
+    const anchorGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    anchorGroup.setAttribute('data-action', 'anchor');
+    anchorGroup.style.cursor = 'move';
+
+    // Outer circle
+    const anchorCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    anchorCircle.setAttribute('cx', anchor.x);
+    anchorCircle.setAttribute('cy', anchor.y);
+    anchorCircle.setAttribute('r', anchorSize);
+    anchorCircle.setAttribute('fill', 'rgba(37, 99, 235, 0.1)');
+    anchorCircle.setAttribute('stroke', 'var(--accent)');
+    anchorCircle.setAttribute('stroke-width', '1.5');
+    anchorCircle.setAttribute('vector-effect', 'non-scaling-stroke');
+    anchorCircle.setAttribute('data-action', 'anchor');
+    anchorGroup.appendChild(anchorCircle);
+
+    // Crosshair horizontal
+    const anchorH = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    anchorH.setAttribute('x1', anchor.x - anchorSize);
+    anchorH.setAttribute('y1', anchor.y);
+    anchorH.setAttribute('x2', anchor.x + anchorSize);
+    anchorH.setAttribute('y2', anchor.y);
+    anchorH.setAttribute('stroke', 'var(--accent)');
+    anchorH.setAttribute('stroke-width', '1');
+    anchorH.setAttribute('vector-effect', 'non-scaling-stroke');
+    anchorH.setAttribute('pointer-events', 'none');
+    anchorGroup.appendChild(anchorH);
+
+    // Crosshair vertical
+    const anchorV = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    anchorV.setAttribute('x1', anchor.x);
+    anchorV.setAttribute('y1', anchor.y - anchorSize);
+    anchorV.setAttribute('x2', anchor.x);
+    anchorV.setAttribute('y2', anchor.y + anchorSize);
+    anchorV.setAttribute('stroke', 'var(--accent)');
+    anchorV.setAttribute('stroke-width', '1');
+    anchorV.setAttribute('vector-effect', 'non-scaling-stroke');
+    anchorV.setAttribute('pointer-events', 'none');
+    anchorGroup.appendChild(anchorV);
+
+    // Small center dot
+    const anchorDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    anchorDot.setAttribute('cx', anchor.x);
+    anchorDot.setAttribute('cy', anchor.y);
+    anchorDot.setAttribute('r', 2);
+    anchorDot.setAttribute('fill', 'var(--accent)');
+    anchorDot.setAttribute('pointer-events', 'none');
+    anchorGroup.appendChild(anchorDot);
+
+    selectionOverlay.appendChild(anchorGroup);
+
+    // Rotate handle (connected to anchor by line, positioned above bbox)
+    const rotOff = 25;
+    const rotLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    rotLine.setAttribute('x1', bx + bw / 2);
+    rotLine.setAttribute('y1', by);
+    rotLine.setAttribute('x2', bx + bw / 2);
+    rotLine.setAttribute('y2', by - rotOff);
+    rotLine.setAttribute('class', 'selection-rotate-line');
+    selectionOverlay.appendChild(rotLine);
+
+    const rotHandle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    rotHandle.setAttribute('cx', bx + bw / 2);
+    rotHandle.setAttribute('cy', by - rotOff);
+    rotHandle.setAttribute('r', 5);
+    rotHandle.setAttribute('class', 'selection-rotate-handle');
+    rotHandle.setAttribute('data-action', 'rotate');
+    selectionOverlay.appendChild(rotHandle);
+}
+
+function transformPathD(d, transform) {
+    const { translateX = 0, translateY = 0, scaleX = 1, scaleY = 1,
+            originX = 0, originY = 0, rotation = 0 } = transform;
+    const segments = d.match(/[MmLlHhVvCcSsQqTtAaZz][^MmLlHhVvCcSsQqTtAaZz]*/g);
+    if (!segments) return d;
+    const numRe = /[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/g;
+    let result = '';
+    for (const seg of segments) {
+        const cmd = seg[0];
+        const nums = seg.slice(1).match(numRe);
+        if (!nums || cmd === 'Z' || cmd === 'z') { result += seg; continue; }
+        const values = nums.map(Number);
+        const transformed = [];
+        if ('MLTSQC'.includes(cmd)) {
+            for (let i = 0; i < values.length; i += 2) {
+                if (i + 1 < values.length) {
+                    let [x, y] = applyTransformToPoint(values[i], values[i+1], transform);
+                    transformed.push(x, y);
+                } else { transformed.push(values[i]); }
+            }
+        } else if (cmd === 'H') {
+            for (const v of values) {
+                let [x] = applyTransformToPoint(v, originY, transform);
+                transformed.push(x);
+            }
+        } else if (cmd === 'V') {
+            for (const v of values) {
+                let [, y] = applyTransformToPoint(originX, v, transform);
+                transformed.push(y);
+            }
+        } else if (cmd === 'A') {
+            for (let i = 0; i < values.length; i += 7) {
+                transformed.push(values[i] * Math.abs(scaleX));
+                transformed.push(values[i+1] * Math.abs(scaleY));
+                transformed.push(values[i+2] + (rotation || 0));
+                transformed.push(values[i+3]);
+                transformed.push(values[i+4]);
+                let [x, y] = applyTransformToPoint(values[i+5], values[i+6], transform);
+                transformed.push(x, y);
+            }
+        } else if (cmd === 'h') {
+            for (const v of values) transformed.push(v * scaleX);
+        } else if (cmd === 'v') {
+            for (const v of values) transformed.push(v * scaleY);
+        } else {
+            for (let i = 0; i < values.length; i += 2) {
+                if (i + 1 < values.length) {
+                    transformed.push(values[i] * scaleX, values[i+1] * scaleY);
+                } else { transformed.push(values[i]); }
+            }
+        }
+        result += cmd + ' ' + transformed.map(n => Math.round(n * 100) / 100).join(' ') + ' ';
+    }
+    return result.trim();
+}
+
+function applyTransformToPoint(x, y, transform) {
+    const { translateX = 0, translateY = 0, scaleX = 1, scaleY = 1,
+            originX = 0, originY = 0, rotation = 0 } = transform;
+    let px = x - originX;
+    let py = y - originY;
+    px *= scaleX;
+    py *= scaleY;
+    if (rotation !== 0) {
+        const rad = rotation * Math.PI / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const rx = px * cos - py * sin;
+        const ry = px * sin + py * cos;
+        px = rx; py = ry;
+    }
+    px += originX + translateX;
+    py += originY + translateY;
+    return [px, py];
+}
+
+function handleSelectPointerDown(e) {
+    if (state.isPlaying) return;
+    const point = getSvgPoint(e);
+    const frame = getSelectionFrame();
+    if (!frame) return;
+    const sel = state.selection;
+    const target = e.target;
+    const action = target.getAttribute('data-action');
+
+    if (action === 'anchor') {
+        sel.isDraggingAnchor = true;
+        sel.dragStart = point;
+        return;
+    }
+    if (action === 'rotate') {
+        sel.isRotating = true;
+        sel.dragStart = point;
+        sel.originalPaths = JSON.parse(JSON.stringify(sel.indices.map(i => frame.paths[i])));
+        // Snapshot anchor as fixed pivot for this entire rotation drag
+        const pivot = getSelectionAnchor();
+        sel.rotateAnchor = { x: pivot.x, y: pivot.y };
+        sel.rotateStart = Math.atan2(
+            point.y - pivot.y,
+            point.x - pivot.x
+        );
+        saveStateForUndo();
+        return;
+    }
+    if (action === 'resize') {
+        sel.isResizing = true;
+        sel.resizeHandle = target.getAttribute('data-handle');
+        sel.dragStart = point;
+        sel.resizeOrigin = { ...sel.bbox };
+        sel.originalPaths = JSON.parse(JSON.stringify(sel.indices.map(i => frame.paths[i])));
+        saveStateForUndo();
+        return;
+    }
+    if (action === 'move') {
+        sel.isDragging = true;
+        sel.dragStart = point;
+        sel.originalPaths = JSON.parse(JSON.stringify(sel.indices.map(i => frame.paths[i])));
+        if (sel.anchorLocked && sel.anchor) {
+            sel._anchorAtDragStart = { x: sel.anchor.x, y: sel.anchor.y };
+        }
+        saveStateForUndo();
+        return;
+    }
+
+    const hitIndex = findPathAtPoint(frame, point);
+    if (hitIndex >= 0) {
+        const shiftHeld = e.shiftKey || state.shiftPressed;
+        if (shiftHeld) {
+            const existingIdx = sel.indices.indexOf(hitIndex);
+            if (existingIdx >= 0) { sel.indices.splice(existingIdx, 1); }
+            else { sel.indices.push(hitIndex); }
+        } else {
+            if (sel.indices.includes(hitIndex)) {
+                sel.isDragging = true;
+                sel.dragStart = point;
+                sel.originalPaths = JSON.parse(JSON.stringify(sel.indices.map(i => frame.paths[i])));
+                if (sel.anchorLocked && sel.anchor) {
+                    sel._anchorAtDragStart = { x: sel.anchor.x, y: sel.anchor.y };
+                }
+                saveStateForUndo();
+                drawSelectionOverlay();
+                return;
+            }
+            sel.indices = [hitIndex];
+            // Reset anchor for new selection
+            sel.anchor = null;
+            sel.anchorLocked = false;
+        }
+        drawSelectionOverlay();
+    } else {
+        if (!e.shiftKey && !state.shiftPressed) { sel.indices = []; }
+        sel.isMarquee = true;
+        sel.marqueeStart = point;
+        sel.dragStart = point;
+        drawSelectionOverlay();
+    }
+}
+
+function handleSelectPointerMove(e) {
+    const point = getSvgPoint(e);
+    const frame = getSelectionFrame();
+    const sel = state.selection;
+
+    if (sel.isMarquee) {
+        sel.dragStart = point;
+        drawSelectionOverlay();
+        return;
+    }
+    if (!frame) return;
+
+    if (sel.isDragging && sel.dragStart && sel.originalPaths) {
+        const dx = point.x - sel.dragStart.x;
+        const dy = point.y - sel.dragStart.y;
+        for (let i = 0; i < sel.indices.length; i++) {
+            const idx = sel.indices[i];
+            const original = sel.originalPaths[i];
+            frame.paths[idx].d = transformPathD(original.d, { translateX: dx, translateY: dy });
+        }
+        // Move anchor along with selection
+        if (sel.anchorLocked && sel._anchorAtDragStart) {
+            sel.anchor = {
+                x: sel._anchorAtDragStart.x + dx,
+                y: sel._anchorAtDragStart.y + dy
+            };
+        }
+        renderFrame();
+        drawSelectionOverlay();
+        return;
+    }
+
+    if (sel.isResizing && sel.dragStart && sel.originalPaths && sel.resizeOrigin) {
+        const handle = sel.resizeHandle;
+        const orig = sel.resizeOrigin;
+        const dx = point.x - sel.dragStart.x;
+        const dy = point.y - sel.dragStart.y;
+        let scaleX = 1, scaleY = 1;
+        let originX = orig.x, originY = orig.y;
+        if (handle.includes('e')) { scaleX = (orig.width + dx) / orig.width; originX = orig.x; }
+        if (handle.includes('w')) { scaleX = (orig.width - dx) / orig.width; originX = orig.x + orig.width; }
+        if (handle.includes('s')) { scaleY = (orig.height + dy) / orig.height; originY = orig.y; }
+        if (handle.includes('n')) { scaleY = (orig.height - dy) / orig.height; originY = orig.y + orig.height; }
+        if (('nw ne sw se'.includes(handle)) && (e.shiftKey || state.shiftPressed)) {
+            const us = Math.max(Math.abs(scaleX), Math.abs(scaleY));
+            scaleX = scaleX < 0 ? -us : us;
+            scaleY = scaleY < 0 ? -us : us;
+        }
+        if (handle === 'n' || handle === 's') scaleX = 1;
+        if (handle === 'e' || handle === 'w') scaleY = 1;
+        if (Math.abs(scaleX) < 0.01) scaleX = 0.01;
+        if (Math.abs(scaleY) < 0.01) scaleY = 0.01;
+        for (let i = 0; i < sel.indices.length; i++) {
+            const idx = sel.indices[i];
+            const original = sel.originalPaths[i];
+            frame.paths[idx].d = transformPathD(original.d, { scaleX, scaleY, originX, originY });
+            if (original.strokeWidth && !('n s e w'.split(' ').includes(handle))) {
+                const avgScale = (Math.abs(scaleX) + Math.abs(scaleY)) / 2;
+                frame.paths[idx].strokeWidth = parseFloat(original.strokeWidth) * avgScale;
+            }
+        }
+        renderFrame();
+        drawSelectionOverlay();
+        return;
+    }
+
+    if (sel.isDraggingAnchor) {
+        sel.anchor = { x: point.x, y: point.y };
+        sel.anchorLocked = true;
+        drawSelectionOverlay();
+        return;
+    }
+
+    if (sel.isRotating && sel.dragStart && sel.originalPaths && sel.rotateAnchor) {
+        // Use the FIXED pivot snapshot, not the live bbox center
+        const cx = sel.rotateAnchor.x;
+        const cy = sel.rotateAnchor.y;
+        const angle = Math.atan2(point.y - cy, point.x - cx);
+        let delta = (angle - sel.rotateStart) * 180 / Math.PI;
+        if (e.shiftKey || state.shiftPressed) delta = Math.round(delta / 15) * 15;
+        for (let i = 0; i < sel.indices.length; i++) {
+            const idx = sel.indices[i];
+            const original = sel.originalPaths[i];
+            frame.paths[idx].d = transformPathD(original.d, { rotation: delta, originX: cx, originY: cy });
+        }
+        renderFrame();
+        drawSelectionOverlay();
+        return;
+    }
+}
+
+function handleSelectPointerUp(e) {
+    const sel = state.selection;
+    if (sel.isMarquee && sel.marqueeStart) {
+        const frame = getSelectionFrame();
+        if (frame && sel.dragStart) {
+            const mx1 = Math.min(sel.marqueeStart.x, sel.dragStart.x);
+            const my1 = Math.min(sel.marqueeStart.y, sel.dragStart.y);
+            const mx2 = Math.max(sel.marqueeStart.x, sel.dragStart.x);
+            const my2 = Math.max(sel.marqueeStart.y, sel.dragStart.y);
+            if (mx2 - mx1 > 3 || my2 - my1 > 3) {
+                for (let i = 0; i < frame.paths.length; i++) {
+                    const pathData = frame.paths[i];
+                    if (!pathData.d) continue;
+                    const bbox = getPathBBox(pathData.d);
+                    if (bbox.x + bbox.width >= mx1 && bbox.x <= mx2 &&
+                        bbox.y + bbox.height >= my1 && bbox.y <= my2) {
+                        if (!sel.indices.includes(i)) sel.indices.push(i);
+                    }
+                }
+            }
+        }
+    }
+    sel.isMarquee = false;
+    sel.marqueeStart = null;
+    sel.isDragging = false;
+    sel.isDraggingAnchor = false;
+    sel.isResizing = false;
+    sel.isRotating = false;
+    sel.dragStart = null;
+    sel.resizeHandle = null;
+    sel.resizeOrigin = null;
+    sel.rotateAnchor = null;
+    sel.rotateStart = null;
+    sel.originalPaths = null;
+    sel._anchorAtDragStart = null;
+    if (sel.indices.length > 0) saveToLocalStorage();
+    drawSelectionOverlay();
+}
+
+function deleteSelectedPaths() {
+    const frame = getSelectionFrame();
+    if (!frame || state.selection.indices.length === 0) return;
+    saveStateForUndo();
+    const sorted = [...state.selection.indices].sort((a, b) => b - a);
+    for (const idx of sorted) {
+        if (idx < frame.paths.length) frame.paths.splice(idx, 1);
+    }
+    clearSelection();
+    state.redoStack = [];
+    renderFrame();
+    updateFrameList();
+    saveToLocalStorage();
+}
+
+function selectAllPaths() {
+    if (state.tool !== 'select') return;
+    const frame = getSelectionFrame();
+    if (!frame) return;
+    state.selection.indices = frame.paths.map((_, i) => i);
+    drawSelectionOverlay();
+}
+
+// Override frame/layer selection to clear selection state
+const _origSelectFrame = selectFrame;
+selectFrame = function(index) {
+    if (state.tool === 'select') clearSelection();
+    _origSelectFrame(index);
+};
+
+const _origSelectLayer = selectLayer;
+selectLayer = function(layerId) {
+    if (state.tool === 'select') clearSelection();
+    _origSelectLayer(layerId);
+};
+
+
+// ==================== SHORTCUTS PANEL ====================
+function toggleShortcutsPanel() {
+    const panel = document.getElementById('shortcutsPanel');
+    if (panel.style.display === 'none') {
+        panel.style.display = 'flex';
+    } else {
+        closeShortcutsPanel();
+    }
+}
+
+function closeShortcutsPanel() {
+    document.getElementById('shortcutsPanel').style.display = 'none';
 }
 
 // ==================== START APPLICATION ====================
