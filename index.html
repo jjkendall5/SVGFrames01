@@ -9,47 +9,41 @@
     <script src="https://cdn.jsdelivr.net/npm/gifshot@0.4.5/dist/gifshot.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     
-    <!-- TEST MP4 BUTTON - Remove after testing -->
+    <!-- TEST MP4 with different CDNs -->
     <script>
         window.testMP4 = async function() {
-            console.log('=== MP4 TEST START ===');
-            
-            // Test 1: Check WebCodecs
-            console.log('1. VideoEncoder:', typeof VideoEncoder !== 'undefined' ? '✅' : '❌');
-            console.log('2. VideoFrame:', typeof VideoFrame !== 'undefined' ? '✅' : '❌');
+            console.log('=== MP4 TEST - Trying different CDNs ===');
             
             if (!window.VideoEncoder) {
-                alert('❌ WebCodecs not supported. Need Chrome 94+ or Edge 94+');
+                alert('❌ WebCodecs not supported');
                 return;
             }
             
-            try {
-                // Test 2: Try to import mp4-muxer
-                console.log('3. Importing mp4-muxer...');
-                const module = await import('https://unpkg.com/mp4-muxer@5.1.1/build/mp4-muxer.js');
-                console.log('4. Import result:', module);
-                console.log('5. Module keys:', Object.keys(module));
-                console.log('6. Module.default:', module.default);
-                
-                // Check different possible exports
-                const Muxer = module.Muxer || module.default?.Muxer;
-                const ArrayBufferTarget = module.ArrayBufferTarget || module.default?.ArrayBufferTarget;
-                
-                console.log('7. Muxer:', Muxer);
-                console.log('8. ArrayBufferTarget:', ArrayBufferTarget);
-                
-                if (Muxer && ArrayBufferTarget) {
-                    alert('✅ SUCCESS! MP4 export should work.\n\nMuxer and ArrayBufferTarget found.\n\nCheck console for details.');
-                    console.log('=== MP4 TEST PASSED ===');
-                } else {
-                    const keys = Object.keys(module).join(', ');
-                    alert('❌ Available exports: ' + keys + '\n\nCheck console for full details.');
-                    console.log('Module exports:', module);
+            const cdns = [
+                { name: 'esm.sh', url: 'https://esm.sh/mp4-muxer@5.1.1' },
+                { name: 'skypack', url: 'https://cdn.skypack.dev/mp4-muxer@5.1.1' },
+                { name: 'jsdelivr +esm', url: 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.1/+esm' }
+            ];
+            
+            for (const cdn of cdns) {
+                try {
+                    console.log(`Testing ${cdn.name}...`);
+                    const m = await import(cdn.url);
+                    console.log(`${cdn.name} - Keys:`, Object.keys(m));
+                    console.log(`${cdn.name} - Muxer:`, m.Muxer);
+                    console.log(`${cdn.name} - ArrayBufferTarget:`, m.ArrayBufferTarget);
+                    
+                    if (m.Muxer && m.ArrayBufferTarget) {
+                        alert(`✅ SUCCESS with ${cdn.name}!\n\nMP4 export should work now.\n\nURL: ${cdn.url}`);
+                        console.log(`=== WORKING CDN: ${cdn.name} ===`);
+                        return;
+                    }
+                } catch (e) {
+                    console.log(`${cdn.name} failed:`, e.message);
                 }
-            } catch (err) {
-                console.error('Import error:', err);
-                alert('❌ FAILED: ' + err.message);
             }
+            
+            alert('❌ All CDNs failed. MP4 not available.\n\nUse WebM export instead.');
         };
     </script>
     <script src="https://unpkg.com/mp4-muxer@5.1.1/build/mp4-muxer.min.js"></script>
@@ -84,9 +78,9 @@
         <div class="header-right">
             <span id="autoSaveIndicator" class="auto-save-indicator">Auto-saved</span>
             
-            <!-- TEMP TEST BUTTON - Remove after testing -->
-            <button onclick="window.testMP4()" class="header-btn" style="background: #fef2f2; color: #dc2626;" title="Test if MP4 export will work">
-                Test MP4
+            <!-- TEST DIFFERENT CDNs -->
+            <button onclick="window.testMP4()" class="header-btn" style="background: #fef2f2; color: #dc2626;">
+                Test CDNs
             </button>
             
             <button id="undoBtn" class="header-btn" title="Undo (Ctrl+Z)">
@@ -114,7 +108,7 @@
                     </button>
                     <button id="exportMp4Btn" class="export-option">
                         <span class="export-icon">🎬</span>
-                        <span class="export-label">MP4 Video</span>
+                        <span class="export-label">Video (WebM)</span>
                     </button>
                 </div>
             </div>
