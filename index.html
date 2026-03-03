@@ -8,7 +8,51 @@
     <!-- gifshot library for reliable client-side GIF encoding without workers -->
     <script src="https://cdn.jsdelivr.net/npm/gifshot@0.4.5/dist/gifshot.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://unpkg.com/h264-mp4-encoder@1.0.0/embuild/dist/h264-mp4-encoder.web.js"></script>
+    
+    <!-- TEST MP4 BUTTON - Remove after testing -->
+    <script>
+        window.testMP4 = async function() {
+            console.log('=== MP4 TEST START ===');
+            
+            // Test 1: Check WebCodecs
+            console.log('1. VideoEncoder:', typeof VideoEncoder !== 'undefined' ? '✅' : '❌');
+            console.log('2. VideoFrame:', typeof VideoFrame !== 'undefined' ? '✅' : '❌');
+            
+            if (!window.VideoEncoder) {
+                alert('❌ WebCodecs not supported. Need Chrome 94+ or Edge 94+');
+                return;
+            }
+            
+            try {
+                // Test 2: Try to import mp4-muxer
+                console.log('3. Importing mp4-muxer...');
+                const module = await import('https://unpkg.com/mp4-muxer@5.1.1/build/mp4-muxer.js');
+                console.log('4. Import result:', module);
+                console.log('5. Module keys:', Object.keys(module));
+                console.log('6. Module.default:', module.default);
+                
+                // Check different possible exports
+                const Muxer = module.Muxer || module.default?.Muxer;
+                const ArrayBufferTarget = module.ArrayBufferTarget || module.default?.ArrayBufferTarget;
+                
+                console.log('7. Muxer:', Muxer);
+                console.log('8. ArrayBufferTarget:', ArrayBufferTarget);
+                
+                if (Muxer && ArrayBufferTarget) {
+                    alert('✅ SUCCESS! MP4 export should work.\n\nMuxer and ArrayBufferTarget found.\n\nCheck console for details.');
+                    console.log('=== MP4 TEST PASSED ===');
+                } else {
+                    const keys = Object.keys(module).join(', ');
+                    alert('❌ Available exports: ' + keys + '\n\nCheck console for full details.');
+                    console.log('Module exports:', module);
+                }
+            } catch (err) {
+                console.error('Import error:', err);
+                alert('❌ FAILED: ' + err.message);
+            }
+        };
+    </script>
+    <script src="https://unpkg.com/mp4-muxer@5.1.1/build/mp4-muxer.min.js"></script>
 </head>
 <body>
     <!-- Minimal Top Header -->
@@ -39,6 +83,12 @@
         </div>
         <div class="header-right">
             <span id="autoSaveIndicator" class="auto-save-indicator">Auto-saved</span>
+            
+            <!-- TEMP TEST BUTTON - Remove after testing -->
+            <button onclick="window.testMP4()" class="header-btn" style="background: #fef2f2; color: #dc2626;" title="Test if MP4 export will work">
+                Test MP4
+            </button>
+            
             <button id="undoBtn" class="header-btn" title="Undo (Ctrl+Z)">
                 <span class="icon">↶</span>
                 <span class="label">Undo</span>
