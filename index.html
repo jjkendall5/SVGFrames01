@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SVG Frame</title>
+    <title>AnimFrame</title>
     <link rel="stylesheet" href="styles.css">
     <!-- gifshot library for reliable client-side GIF encoding without workers -->
     <script src="https://cdn.jsdelivr.net/npm/gifshot@0.4.5/dist/gifshot.min.js"></script>
@@ -14,7 +14,7 @@
     <!-- Minimal Top Header -->
     <header class="app-header">
         <div class="header-left">
-            <span class="app-name">SVG Frame</span>
+            <span class="app-name">AnimFrame</span>
             <div class="canvas-size-selector">
                 <label class="canvas-size-label">Canvas</label>
                 <select id="canvasSizeSelect" class="canvas-size-select">
@@ -61,6 +61,7 @@
             </div>
             <button id="exportJsonBtn" class="header-btn">Save</button>
             <button id="importJsonBtn" class="header-btn">Open</button>
+            <button id="newProjectBtn" class="header-btn">New</button>
             <input type="file" id="fileInput" accept=".json" style="display: none;">
             <div class="header-divider"></div>
             <button id="shortcutsBtn" class="header-btn shortcuts-btn" title="Keyboard Shortcuts (?)">
@@ -163,17 +164,7 @@
                 </label>
             </div>
 
-            <div class="tool-divider"></div>
-
-            <div class="tool-section">
-                <button id="constraintToggle" class="tool-btn constraint-btn" title="Constraint Mode - Straight Lines & Circles">
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="3" y1="17" x2="17" y2="3"/>
-                        <circle cx="10" cy="10" r="6"/>
-                    </svg>
-                    <span class="tool-label">Constraint</span>
-                </button>
-            </div>
+            <!-- Constraint button hidden for now - re-add in later version -->
         </aside>
 
         <!-- Center: Canvas -->
@@ -262,8 +253,9 @@
             <div class="control-group">
                 <button id="copyFrameBtn" class="timeline-btn" title="Copy Frame (Ctrl+C)">
                     <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1.5"/>
-                        <path d="M10.5 5.5V3a1.5 1.5 0 0 0-1.5-1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h2.5"/>
+                        <rect x="4" y="1.5" width="8" height="10" rx="1.5"/>
+                        <path d="M7 14.5h5.5a2 2 0 0 0 0-4H9"/>
+                        <path d="M11 8.5l2 2-2 2"/>
                     </svg>
                 </button>
                 <button id="pasteFrameBtn" class="timeline-btn" title="Paste Frame (Ctrl+V)">
@@ -288,18 +280,11 @@
                     </svg>
                 </button>
             </div>
-            </div>
         </div>
 
         <!-- Frame Strip -->
         <div class="timeline-content">
-            <div class="frames-section">
-                <div class="frames-scroll" id="frameList">
-                    <!-- Frame thumbnails inserted here -->
-                </div>
-            </div>
-
-            <!-- Layers Section (part of timeline zone) -->
+            <!-- Layers Section -->
             <div class="layers-section">
                 <div id="layerList" class="layer-list">
                     <!-- Layer items inserted here -->
@@ -316,6 +301,12 @@
                         </svg>
                         <span class="label">Duplicate</span>
                     </button>
+                </div>
+            </div>
+
+            <div class="frames-section">
+                <div class="frames-scroll" id="frameList">
+                    <!-- Frame thumbnails inserted here -->
                 </div>
             </div>
         </div>
@@ -377,6 +368,9 @@
                     <h4>Playback</h4>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>Space</kbd></span><span class="shortcut-desc">Play / Stop</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>Esc</kbd></span><span class="shortcut-desc">Stop playback</span></div>
+                    <div class="shortcut-row"><span class="shortcut-keys"><kbd>,</kbd></span><span class="shortcut-desc">Previous frame</span></div>
+                    <div class="shortcut-row"><span class="shortcut-keys"><kbd>.</kbd></span><span class="shortcut-desc">Next frame</span></div>
+                    <div class="shortcut-row"><span class="shortcut-keys"><kbd>N</kbd></span><span class="shortcut-desc">New frame</span></div>
                 </div>
                 <div class="shortcuts-group">
                     <h4>View</h4>

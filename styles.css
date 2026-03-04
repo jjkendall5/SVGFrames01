@@ -419,18 +419,6 @@ body {
     color: #dc2626;
 }
 
-.constraint-btn.active {
-    background: #dbeafe;
-    color: #2563eb;
-    border: 2px solid #2563eb;
-}
-
-.constraint-btn.circle-mode {
-    background: #fef3c7;
-    color: #f59e0b;
-    border: 2px solid #f59e0b;
-}
-
 /* ==================== SELECTION TOOL ==================== */
 .selection-bbox {
     fill: none;
@@ -555,8 +543,11 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 4px;
     margin-top: 4px;
+    width: 100%;
+    padding: 0 4px;
+    box-sizing: border-box;
 }
 
 .size-slider {
@@ -610,7 +601,8 @@ body {
     font-weight: 700;
     color: var(--accent);
     text-align: center;
-    min-width: 16px;
+    width: 24px;
+    flex-shrink: 0;
     font-variant-numeric: tabular-nums;
 }
 
@@ -654,8 +646,11 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 4px;
     margin-top: 4px;
+    width: 100%;
+    padding: 0 4px;
+    box-sizing: border-box;
 }
 
 .smoothing-slider {
@@ -710,6 +705,8 @@ body {
     flex-direction: column;
     gap: 8px;
     align-items: center;
+    width: 24px;
+    flex-shrink: 0;
 }
 
 .smoothing-indicator .level-label {
@@ -732,8 +729,11 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 4px;
     margin-top: 4px;
+    width: 100%;
+    padding: 0 4px;
+    box-sizing: border-box;
 }
 
 .taper-slider {
@@ -787,7 +787,8 @@ body {
     font-weight: 700;
     color: var(--accent);
     text-align: center;
-    min-width: 20px;
+    width: 24px;
+    flex-shrink: 0;
     font-variant-numeric: tabular-nums;
 }
 
@@ -1206,8 +1207,9 @@ body {
     flex-direction: column;
     background: var(--bg-panel);
     flex-shrink: 0;
-    min-width: 100px; /* Allow compression on small screens */
+    min-width: 100px;
     overflow: hidden;
+    border-right: 1px solid var(--border);
 }
 
 .layer-list {
@@ -1225,7 +1227,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 0;
-    padding: var(--space-1) var(--space-2);
+    padding: 2px var(--space-2);
     background: transparent;
     border: 1px solid transparent;
     border-radius: 4px;
@@ -1238,7 +1240,7 @@ body {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    min-height: 28px;
+    height: 26px;
 }
 
 .layer-item:hover {
@@ -1264,9 +1266,9 @@ body {
 
 .layer-item.active .layer-opacity-wrap,
 .layer-item:hover .layer-opacity-wrap {
-    max-height: 22px;
+    max-height: 18px;
     opacity: 1;
-    padding-top: 2px;
+    padding-top: 1px;
     padding-bottom: 1px;
 }
 
@@ -1369,6 +1371,20 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    cursor: text;
+}
+
+.layer-rename-input {
+    width: 100%;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    padding: 1px 4px;
+    outline: none;
+    font-family: inherit;
 }
 
 /* BG Layer checkbox */

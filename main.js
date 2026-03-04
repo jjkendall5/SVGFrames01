@@ -73,10 +73,6 @@ function init() {
     fixIOSViewportHeight();
     
     // Check what libraries are loaded
-    console.log('Libraries loaded:');
-    console.log('- gifshot:', typeof gifshot !== 'undefined' ? '✓' : '✗');
-    console.log('- JSZip:', typeof JSZip !== 'undefined' ? '✓' : '✗');
-    console.log('- FFmpegWASM:', typeof FFmpegWASM !== 'undefined' ? '✓' : '✗');
     
     // Start playback watchdog (checks for stuck states every second)
     startPlaybackWatchdog();
@@ -139,7 +135,6 @@ function startAutoSave() {
         showAutoSaveIndicator();
     }, 30000); // 30 seconds
     
-    console.log('Auto-save enabled (every 30 seconds)');
 }
 
 function showAutoSaveIndicator() {
@@ -184,6 +179,10 @@ function fixIOSViewportHeight() {
 }
 
 // Update constraint button UI to show current mode
+function getCurrentLayer() {
+    return state.layers.find(l => l.id === state.currentLayerId);
+}
+
 function updateConstraintButtonUI() {
     const btn = document.getElementById('constraintToggle');
     if (!btn) return;
@@ -229,6 +228,7 @@ function setupEventListeners() {
     const constraintBtn = document.getElementById('constraintToggle');
     let pressTimer = null;
     
+    if (constraintBtn) {
     constraintBtn.addEventListener('click', (e) => {
         // Short click = toggle constraint mode
         if (!pressTimer) { // Only if not a long press
@@ -267,6 +267,7 @@ function setupEventListeners() {
             pressTimer = null;
         }
     });
+    } // end constraintBtn check
 
     // Size slider
     document.getElementById('sizeSlider').addEventListener('input', (e) => {
@@ -344,7 +345,6 @@ function setupEventListeners() {
         // Toggle state
         state.onionSkinEnabled = !state.onionSkinEnabled;
         
-        console.log('Toggled onion skin to:', state.onionSkinEnabled);
         
         // Update button appearance
         if (state.onionSkinEnabled) {
@@ -422,7 +422,6 @@ function setupEventListeners() {
     playBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         playBtnTouchHandled = true;
-        console.log('Play button touched (touchstart)');
         togglePlayback();
     }, { passive: false });
     
@@ -435,7 +434,6 @@ function setupEventListeners() {
         }
         
         e.preventDefault();
-        console.log('Play button clicked (click)');
         togglePlayback();
     }, { passive: false });
     
@@ -450,7 +448,6 @@ function setupEventListeners() {
             if (timeSinceLastTap < 300 && timeSinceLastTap > 0) {
                 // Double-tap detected
                 if (state.isPlaying) {
-                    console.log('Double-tap stop detected');
                     stopPlayback();
                 }
             }
@@ -478,7 +475,6 @@ function setupEventListeners() {
     
     exportMenuBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        console.log('Export menu button clicked');
         const isVisible = exportMenu.style.display === 'block';
         
         if (isVisible) {
@@ -491,8 +487,6 @@ function setupEventListeners() {
             exportMenu.style.opacity = '1';
         }
         
-        console.log('Menu display set to:', exportMenu.style.display);
-        console.log('Menu computed style:', window.getComputedStyle(exportMenu).display);
     });
     
     // Close export menu when clicking outside
@@ -532,6 +526,7 @@ function setupEventListeners() {
         document.getElementById('fileInput').click();
     });
     document.getElementById('fileInput').addEventListener('change', importProject);
+    document.getElementById('newProjectBtn').addEventListener('click', newProject);
 
     // Auto-save every 10 seconds
     setInterval(saveToLocalStorage, 10000);
@@ -699,6 +694,31 @@ function handleKeyboardShortcut(e) {
         return;
     }
     
+    // , key - previous frame
+    if (e.key === ',') {
+        e.preventDefault();
+        if (state.currentFrameIndex > 0) {
+            selectFrame(state.currentFrameIndex - 1);
+        }
+        return;
+    }
+    
+    // . key - next frame
+    if (e.key === '.') {
+        e.preventDefault();
+        if (state.currentFrameIndex < state.maxFrames - 1) {
+            selectFrame(state.currentFrameIndex + 1);
+        }
+        return;
+    }
+    
+    // N key - add new frame
+    if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        addFrame();
+        return;
+    }
+    
     // Delete/Backspace - delete selected paths
     if ((e.key === 'Delete' || e.key === 'Backspace') && state.tool === 'select' && state.selection && state.selection.indices.length > 0) {
         e.preventDefault();
@@ -756,11 +776,22 @@ function handleKeyboardShortcut(e) {
 }
 
 // ==================== LAYER MANAGEMENT ====================
+function getNextLayerNumber() {
+    // Find the highest "Layer N" number currently in use
+    let max = 0;
+    for (const layer of state.layers) {
+        const match = layer.name.match(/^Layer (\d+)/);
+        if (match) max = Math.max(max, parseInt(match[1]));
+    }
+    return max + 1;
+}
+
 function addLayer() {
     state.layerIdCounter++;
+    const layerNum = getNextLayerNumber();
     const newLayer = {
         id: `layer-${state.layerIdCounter}`,
-        name: `Layer ${state.layerIdCounter}`,
+        name: `Layer ${layerNum}`,
         visible: true,
         opacity: 1,
         frames: [{ paths: [] }] // Start with one empty frame
@@ -861,6 +892,7 @@ function deleteLayer() {
 }
 
 function selectLayer(layerId) {
+    if (state.currentLayerId === layerId) return; // Already active, don't rebuild DOM
     state.currentLayerId = layerId;
     updateLayerList();
     updateFrameList();
@@ -953,6 +985,11 @@ function updateLayerList() {
         const nameSpan = document.createElement('span');
         nameSpan.className = 'layer-name';
         nameSpan.textContent = layer.name;
+        nameSpan.title = 'Double-click to rename';
+        nameSpan.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            startLayerRename(layer.id, nameSpan);
+        });
         
         // BG checkbox
         const bgLabel = document.createElement('label');
@@ -1051,6 +1088,47 @@ function updateLayerList() {
     });
 }
 
+function startLayerRename(layerId, nameSpan) {
+    const layer = state.layers.find(l => l.id === layerId);
+    if (!layer) return;
+    
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'layer-rename-input';
+    input.value = layer.name;
+    input.maxLength = 30;
+    
+    const finishRename = () => {
+        const newName = input.value.trim();
+        if (newName && newName !== layer.name) {
+            layer.name = newName;
+            saveToLocalStorage();
+        }
+        updateLayerList();
+    };
+    
+    input.addEventListener('blur', finishRename);
+    input.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            input.blur();
+        }
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            input.value = layer.name;
+            input.blur();
+        }
+    });
+    input.addEventListener('click', (e) => e.stopPropagation());
+    input.addEventListener('pointerdown', (e) => e.stopPropagation());
+    
+    nameSpan.textContent = '';
+    nameSpan.appendChild(input);
+    input.focus();
+    input.select();
+}
+
 function updateMaxFrames() {
     state.maxFrames = Math.max(...state.layers.map(l => l.frames.length), 1);
 }
@@ -1112,7 +1190,7 @@ function startDrawing(e) {
         return;
     }
     
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     if (!currentLayer || !currentLayer.visible) return;
     
     // Determine which frame to draw on
@@ -1446,7 +1524,7 @@ function stopDrawing(e) {
     state.isDrawing = false;
     
     if (state.currentPath && state.currentPoints.length > 0) {
-        const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+        const currentLayer = getCurrentLayer();
         
         // Determine which frame to save to (frame 0 for BG layers, current frame otherwise)
         const saveFrameIndex = currentLayer && currentLayer.isBackground ? 0 : state.currentFrameIndex;
@@ -1818,7 +1896,6 @@ function updateBackground() {
 }
 
 function renderFrame() {
-    console.log('Rendering frame:', state.currentFrameIndex);
     
     // Clear layers container
     layersContainer.innerHTML = '';
@@ -1828,7 +1905,6 @@ function renderFrame() {
     
     // Draw onion skin (multi-frame support with customizable settings)
     if (state.onionSkinEnabled) {
-        console.log('✓ ONION SKIN IS ON - Drawing ghost frames');
         const settings = state.onionSkinSettings;
         
         // Draw previous frames (multiple)
@@ -1899,7 +1975,6 @@ function renderFrame() {
             onionSkinLayer.appendChild(nextGroup);
         }
     } else {
-        console.log('✗ ONION SKIN IS OFF - No ghost frames');
     }
     
     // Draw current frame - composite all layers at current frame index
@@ -1935,7 +2010,6 @@ function renderFrame() {
         
         // Draw frame
         if (frameToRender && frameToRender.paths) {
-            console.log(`Layer ${layer.id} at frame ${state.currentFrameIndex}: ${frameToRender.paths.length} paths`);
             frameToRender.paths.forEach(pathData => {
                 const path = createPathElement(pathData);
                 layerGroup.appendChild(path);
@@ -1995,7 +2069,7 @@ function selectTool(tool) {
 }
 
 function clearCurrentFrame() {
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     
     if (!currentLayer || !currentLayer.frames[state.currentFrameIndex]) {
         return;
@@ -2014,7 +2088,7 @@ function clearCurrentFrame() {
 // ==================== FRAME MANAGEMENT ====================
 // These now work on the CURRENT LAYER's timeline
 function addFrame() {
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     if (!currentLayer) return;
     
     // Insert new frame after current frame position
@@ -2041,7 +2115,7 @@ function addFrame() {
 }
 
 function duplicateFrame() {
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     if (!currentLayer || !currentLayer.frames[state.currentFrameIndex]) return;
     
     const currentFrame = currentLayer.frames[state.currentFrameIndex];
@@ -2061,7 +2135,7 @@ function duplicateFrame() {
 }
 
 function addHoldFrame(frameIndex) {
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     if (!currentLayer || !currentLayer.frames[frameIndex]) return;
     
     const frame = currentLayer.frames[frameIndex];
@@ -2092,7 +2166,7 @@ function addHoldFrame(frameIndex) {
 }
 
 function removeHoldFrame(frameIndex) {
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     if (!currentLayer || !currentLayer.frames[frameIndex]) return;
     
     const frame = currentLayer.frames[frameIndex];
@@ -2130,7 +2204,7 @@ function removeHoldFrame(frameIndex) {
 
 // Clear current frame/layer
 function clearCanvas() {
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     if (!currentLayer) return;
     
     const frameIndex = currentLayer.isBackground ? 0 : state.currentFrameIndex;
@@ -2161,7 +2235,7 @@ function clearCanvas() {
 }
 
 function deleteFrame() {
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     
     if (!currentLayer || currentLayer.frames.length === 1) {
         showAlert('Cannot delete the only frame on this layer!', 'Error');
@@ -2206,7 +2280,7 @@ function updateFrameList() {
     const frameList = document.getElementById('frameList');
     frameList.innerHTML = '';
     
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     if (!currentLayer) return;
     
     // Show frames for current layer only
@@ -2320,7 +2394,7 @@ function updateFrameList() {
 }
 
 function updateFrameCounter() {
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     const frameCount = currentLayer ? currentLayer.frames.length : 0;
     
     document.getElementById('frameCounter').textContent = 
@@ -2337,7 +2411,6 @@ function togglePlayback() {
 }
 
 function startPlayback() {
-    console.log('startPlayback called'); // Debug log
     
     // Clear any selection when playing
     if (state.tool === 'select' && typeof clearSelection === 'function') clearSelection();
@@ -2347,7 +2420,6 @@ function startPlayback() {
     
     // Check if we have frames to play
     if (state.maxFrames <= 1) {
-        console.log('Not enough frames to play');
         return;
     }
     
@@ -2373,7 +2445,6 @@ function startPlayback() {
     const playbackLoop = () => {
         // CRITICAL: Multiple stop checks
         if (!state.isPlaying) {
-            console.log('Playback stopped in loop (state check)');
             if (state.playInterval) {
                 cancelAnimationFrame(state.playInterval);
                 state.playInterval = null;
@@ -2423,17 +2494,14 @@ function startPlayback() {
         if (state.isPlaying) {
             state.playInterval = requestAnimationFrame(playbackLoop);
         } else {
-            console.log('State changed, not scheduling next frame');
         }
     };
     
     // Start the loop
     state.playInterval = requestAnimationFrame(playbackLoop);
-    console.log('Playback loop started');
 }
 
 function stopPlayback() {
-    console.log('stopPlayback called'); // Debug log
     
     // CRITICAL: Set state FIRST before anything else
     const wasPlaying = state.isPlaying;
@@ -2479,12 +2547,11 @@ function stopPlayback() {
         console.error('Stop playback render error:', err);
     }
     
-    console.log('stopPlayback complete, isPlaying:', state.isPlaying);
 }
 
 // ==================== UNDO/REDO ====================
 function saveStateForUndo() {
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     if (!currentLayer || !currentLayer.frames[state.currentFrameIndex]) return;
     
     const frameState = JSON.parse(JSON.stringify(currentLayer.frames[state.currentFrameIndex]));
@@ -2594,7 +2661,6 @@ function loadFromLocalStorage() {
                 }
             } else {
                 // Old format - reset
-                console.log('Old data format detected, resetting...');
                 resetToDefault();
             }
             
@@ -2622,6 +2688,37 @@ function resetToDefault() {
     state.fps = 12;
 }
 
+function newProject() {
+    if (!confirm('Start a new project? Any unsaved changes will be lost.')) return;
+    
+    resetToDefault();
+    state.undoStack = [];
+    state.redoStack = [];
+    state.frameClipboard = null;
+    state.backgroundColor = '#ffffff';
+    state.canvasWidth = 600;
+    state.canvasHeight = 600;
+    
+    // Reset UI
+    const svg = document.getElementById('mainSvg');
+    svg.setAttribute('width', 600);
+    svg.setAttribute('height', 600);
+    svg.setAttribute('viewBox', '0 0 600 600');
+    document.getElementById('backgroundRect').setAttribute('fill', '#ffffff');
+    document.getElementById('fpsSelect').value = '12';
+    document.getElementById('canvasSizeSelect').value = '600x600';
+    document.getElementById('colorPicker').value = '#000000';
+    document.getElementById('backgroundColorPicker').value = '#ffffff';
+    document.getElementById('transparentBgToggle').checked = false;
+    
+    clearSelection();
+    updateLayerList();
+    updateFrameList();
+    updateFrameCounter();
+    renderFrame();
+    saveToLocalStorage();
+}
+
 // ==================== EXPORT/IMPORT ====================
 function exportProject() {
     const projectData = {
@@ -2638,7 +2735,7 @@ function exportProject() {
     
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'vector-animation-project.json';
+    link.download = 'animframe-project.json';
     link.click();
     
     URL.revokeObjectURL(url);
@@ -2706,7 +2803,6 @@ async function exportAsGIF() {
     document.body.appendChild(loading);
     
     try {
-        console.log(`Starting GIF export: ${state.maxFrames} frames at ${state.fps} FPS`);
         
         // Create temporary canvas for rendering (use current canvas size)
         const tempCanvas = document.createElement('canvas');
@@ -2719,7 +2815,6 @@ async function exportAsGIF() {
         // Render each frame to base64 image
         for (let i = 0; i < state.maxFrames; i++) {
             loading.textContent = `Rendering frame ${i + 1}/${state.maxFrames}...`;
-            console.log(`Rendering frame ${i + 1}/${state.maxFrames}`);
             
             // Allow UI to update
             await new Promise(resolve => setTimeout(resolve, 10));
@@ -2740,7 +2835,6 @@ async function exportAsGIF() {
             images.push(tempCanvas.toDataURL('image/png'));
         }
         
-        console.log('All frames rendered, starting GIF encoding...');
         loading.textContent = 'Encoding GIF...';
         
         // Create GIF using gifshot
@@ -2754,7 +2848,6 @@ async function exportAsGIF() {
             sampleInterval: 10, // Quality setting (lower = better quality)
         }, function(obj) {
             if (!obj.error) {
-                console.log('GIF encoding complete');
                 loading.textContent = 'Download starting...';
                 
                 // Create download link
@@ -2899,9 +2992,7 @@ async function exportAsMP4() {
     
     try {
         // Import mp4-muxer from esm.sh (the CDN that actually works!)
-        console.log('Importing mp4-muxer from esm.sh...');
         const { Muxer, ArrayBufferTarget } = await import('https://esm.sh/mp4-muxer@5.1.1');
-        console.log('✅ mp4-muxer loaded successfully');
         
         loading.textContent = 'Preparing MP4 encoder...';
         
@@ -2912,7 +3003,6 @@ async function exportAsMP4() {
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         
         // Create MP4 muxer
-        console.log('Creating MP4 muxer...');
         const muxer = new Muxer({
             target: new ArrayBufferTarget(),
             video: {
@@ -2941,7 +3031,6 @@ async function exportAsMP4() {
             latencyMode: 'quality'
         });
         
-        console.log('Encoder configured, starting encoding...');
         
         // Calculate frame timing
         const frameDuration = 1_000_000 / state.fps; // microseconds
@@ -2975,12 +3064,10 @@ async function exportAsMP4() {
         }
         
         // Flush encoder
-        console.log('Flushing encoder...');
         loading.textContent = 'Finalizing MP4...';
         await videoEncoder.flush();
         videoEncoder.close();
         
-        console.log('Finalizing muxer...');
         
         // Finalize muxer
         muxer.finalize();
@@ -2988,12 +3075,10 @@ async function exportAsMP4() {
         // Get the MP4 file data
         const mp4Buffer = muxer.target.buffer;
         
-        console.log('✅ MP4 created:', mp4Buffer.byteLength, 'bytes');
         
         // Verify it's actually MP4 (should start with 'ftyp')
         const header = new Uint8Array(mp4Buffer.slice(4, 8));
         const headerType = String.fromCharCode(...header);
-        console.log('File type:', headerType, '(should be "ftyp")');
         
         // Create download
         const blob = new Blob([mp4Buffer], { type: 'video/mp4' });
@@ -3012,7 +3097,6 @@ async function exportAsMP4() {
         exportBtn.disabled = false;
         exportBtn.innerHTML = originalText;
         
-        console.log('✅ MP4 export complete!');
         
         showAlert('MP4 video exported successfully!\n\nTrue .mp4 file with H.264 codec.', 'Export Complete');
         
@@ -3112,7 +3196,6 @@ function exportAsSVGSequence() {
 function createCompositeSVG(frameIndex) {
     const bgFill = state.backgroundColor === 'transparent' ? 'none' : state.backgroundColor;
     
-    console.log('Exporting frame', frameIndex, 'with background:', bgFill);
     
     let svgContent = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg width="800" height="600" xmlns="http://www.w3.org/2000/svg" version="1.1">
@@ -3134,7 +3217,6 @@ function createCompositeSVG(frameIndex) {
     
     svgContent += `</svg>`;
     
-    console.log('Generated SVG preview:', svgContent.substring(0, 300));
     
     return svgContent;
 }
@@ -3207,7 +3289,7 @@ function showDownloadModal(files) {
 
 // ==================== FRAME COPY/PASTE ====================
 function copyFrame() {
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     if (!currentLayer) return;
     
     const frameIndex = currentLayer.isBackground ? 0 : state.currentFrameIndex;
@@ -3235,7 +3317,7 @@ function pasteFrame() {
         return;
     }
     
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     if (!currentLayer) return;
     
     saveStateForUndo();
@@ -3269,7 +3351,7 @@ function pasteFrame() {
 const selectionOverlay = document.getElementById('selectionOverlay');
 
 function getSelectionFrame() {
-    const currentLayer = state.layers.find(l => l.id === state.currentLayerId);
+    const currentLayer = getCurrentLayer();
     if (!currentLayer) return null;
     const frameIndex = currentLayer.isBackground ? 0 : state.currentFrameIndex;
     return currentLayer.frames[frameIndex] || null;
@@ -3896,11 +3978,7 @@ init();
 // Debug helpers
 window.clearAnimationData = function() {
     localStorage.removeItem('vectorAnimationToolData');
-    console.log('Animation data cleared. Refresh the page.');
 };
 
 window.debugState = function() {
-    console.log('Current state:', state);
-    console.log('Layers:', state.layers);
-    console.log('Current layer:', state.layers.find(l => l.id === state.currentLayerId));
 };
