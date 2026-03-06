@@ -30,6 +30,15 @@ const state = {
     backgroundColor: '#ffffff', // Global background color
     canvasWidth: 600, // Canvas width
     canvasHeight: 600, // Canvas height
+    zoom: 1,           // Current zoom level (1 = 100%)
+    panX: 0,           // Pan offset X in canvas coords
+    panY: 0,           // Pan offset Y in canvas coords
+    isPanning: false,
+    panStart: null,
+    panStartView: null,
+    pinchStartDist: null,
+    pinchStartZoom: null,
+    spaceHeld: false,
     onionSkinEnabled: true,
     onionSkinSettings: {
         framesBefore: 1,
@@ -528,8 +537,17 @@ function setupEventListeners() {
     document.getElementById('fileInput').addEventListener('change', importProject);
     document.getElementById('newProjectBtn').addEventListener('click', newProject);
 
+    // Video import
+    document.getElementById('importVideoBtn').addEventListener('click', () => {
+        document.getElementById('videoFileInput').click();
+    });
+    document.getElementById('videoFileInput').addEventListener('change', handleVideoFileSelect);
+
     // Auto-save every 10 seconds
     setInterval(saveToLocalStorage, 10000);
+
+    // Zoom & Pan
+    setupZoomControls();
 
     // Keyboard shortcuts help panel
     document.getElementById('shortcutsBtn').addEventListener('click', toggleShortcutsPanel);
@@ -554,7 +572,10 @@ function setupKeyboardShortcuts() {
         if (e.key === 'Shift') {
             state.shiftPressed = true;
             
-            // Visual feedback on constraint button
+            // Update zoom cursor
+            if (state.tool === 'zoom') {
+                svg.style.cursor = 'zoom-out';
+            }
             const constraintBtn = document.getElementById('constraintToggle');
             if (constraintBtn && !state.constraintMode) {
                 constraintBtn.style.opacity = '0.5';
@@ -588,7 +609,10 @@ function setupKeyboardShortcuts() {
         if (e.key === 'Shift') {
             state.shiftPressed = false;
             
-            // Remove visual feedback
+            // Update zoom cursor
+            if (state.tool === 'zoom') {
+                svg.style.cursor = 'zoom-in';
+            }
             const constraintBtn = document.getElementById('constraintToggle');
             if (constraintBtn && !state.constraintMode) {
                 constraintBtn.style.opacity = '';
@@ -684,6 +708,13 @@ function handleKeyboardShortcut(e) {
     if (e.key === 'v' || e.key === 'V') {
         e.preventDefault();
         selectTool('select');
+        return;
+    }
+    
+    // Z key - switch to zoom tool (only when not modifier key)
+    if ((e.key === 'z' || e.key === 'Z') && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        selectTool('zoom');
         return;
     }
     
@@ -1184,9 +1215,30 @@ function startDrawing(e) {
     
     if (state.isPlaying) return;
     
+    // Don't draw if panning (space+drag or middle mouse)
+    if (state.isPanning) return;
+    
+    // Don't draw if this is a two-finger touch (pinch)
+    if (e.pointerType === 'touch' && _pinchPointers.length >= 1) {
+        // Store this pointer for pinch tracking
+        _pinchPointers.push({ pointerId: e.pointerId, x: e.clientX, y: e.clientY });
+        return;
+    }
+    
     // Select tool handles its own pointer events
     if (state.tool === 'select') {
         handleSelectPointerDown(e);
+        return;
+    }
+    
+    // Zoom tool: click to zoom in, shift/alt+click to zoom out, drag to pan
+    if (state.tool === 'zoom') {
+        if (e.pointerType !== 'touch' || _pinchPointers.length === 0) {
+            state.isPanning = true;
+            state.panStart = { x: e.clientX, y: e.clientY };
+            state.panStartView = { x: state.panX, y: state.panY };
+            state._zoomClickPos = { x: e.clientX, y: e.clientY };
+        }
         return;
     }
     
@@ -1261,6 +1313,12 @@ function draw(e) {
     // Select tool handles its own pointer events
     if (state.tool === 'select') {
         handleSelectPointerMove(e);
+        return;
+    }
+    
+    // Zoom tool: drag to pan
+    if (state.tool === 'zoom') {
+        handleZoomToolDrag(e);
         return;
     }
     
@@ -1501,10 +1559,28 @@ function createTaperedPath(points, baseWidth, taperAmount) {
 }
 
 function stopDrawing(e) {
+    // Clean up pinch tracking
+    if (e && e.pointerType === 'touch') {
+        removePinchPointer(e);
+    }
+    
     // Select tool handles its own pointer events
     if (state.tool === 'select') {
         if (e) e.preventDefault();
         handleSelectPointerUp(e);
+        return;
+    }
+    
+    // Zoom tool: if barely dragged, treat as click-to-zoom
+    if (state.tool === 'zoom' && state.isPanning && e) {
+        state.isPanning = false;
+        const dragDist = state._zoomClickPos ? 
+            Math.hypot(e.clientX - state._zoomClickPos.x, e.clientY - state._zoomClickPos.y) : 0;
+        if (dragDist < 5) {
+            // Click — zoom in, or shift/alt to zoom out
+            handleZoomToolClick(e);
+        }
+        state._zoomClickPos = null;
         return;
     }
     
@@ -1590,22 +1666,21 @@ function applyEraserCut(frame, eraserPath) {
 }
 
 function getSvgPoint(e) {
+    // Use SVG's own coordinate transform matrix - handles any zoom/pan/transform
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const ctm = svg.getScreenCTM();
+    if (ctm) {
+        const transformed = pt.matrixTransform(ctm.inverse());
+        return { x: transformed.x, y: transformed.y };
+    }
+    // Fallback
     const rect = svg.getBoundingClientRect();
-    
-    // Get the SVG's viewBox dimensions
-    const viewBox = svg.viewBox.baseVal;
-    const viewBoxWidth = viewBox.width;
-    const viewBoxHeight = viewBox.height;
-    
-    // Calculate the scale between screen size and viewBox size
-    const scaleX = viewBoxWidth / rect.width;
-    const scaleY = viewBoxHeight / rect.height;
-    
-    // Map screen coordinates to viewBox coordinates
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
-    
-    return { x, y };
+    return {
+        x: (e.clientX - rect.left) / rect.width * state.canvasWidth,
+        y: (e.clientY - rect.top) / rect.height * state.canvasHeight
+    };
 }
 
 // Convert points array to SVG path data with smooth cubic Bezier curves
@@ -1903,7 +1978,50 @@ function renderFrame() {
     // Clear onion skin layer
     onionSkinLayer.innerHTML = '';
     
-    // Draw onion skin (multi-frame support with customizable settings)
+    // Draw current frame - composite all layers at current frame index
+    // First pass: render reference image layers (video references)
+    state.layers.forEach(layer => {
+        const frameToCheck = layer.isBackground ? layer.frames[0] : layer.frames[state.currentFrameIndex];
+        const hasReference = frameToCheck && frameToCheck.referenceImage;
+        if (!hasReference) return;
+
+        const layerGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        layerGroup.setAttribute('id', `layer-${layer.id}-group`);
+        
+        if (!layer.visible) {
+            layerGroup.setAttribute('opacity', '0');
+        } else {
+            const layerOpacity = layer.opacity !== undefined ? layer.opacity : 1;
+            if (layerOpacity < 1) {
+                layerGroup.setAttribute('opacity', layerOpacity.toString());
+            }
+        }
+        
+        let frameToRender = null;
+        if (layer.isBackground) {
+            frameToRender = layer.frames[0];
+        } else {
+            frameToRender = layer.frames[state.currentFrameIndex];
+            if (frameToRender && frameToRender.holdReference !== undefined) {
+                frameToRender = layer.frames[frameToRender.holdReference];
+            }
+        }
+        
+        if (frameToRender && frameToRender.referenceImage) {
+            const img = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+            img.setAttribute('href', frameToRender.referenceImage);
+            img.setAttribute('x', '0');
+            img.setAttribute('y', '0');
+            img.setAttribute('width', state.canvasWidth);
+            img.setAttribute('height', state.canvasHeight);
+            img.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+            layerGroup.appendChild(img);
+        }
+        
+        layersContainer.appendChild(layerGroup);
+    });
+
+    // Draw onion skin AFTER reference layers so it's visible on top of video
     if (state.onionSkinEnabled) {
         const settings = state.onionSkinSettings;
         
@@ -1921,8 +2039,9 @@ function renderFrame() {
             prevGroup.setAttribute('class', `onion-prev onion-prev-${i}`);
             
             state.layers.forEach(layer => {
-                // Skip background layers in onion skin
+                // Skip background layers and reference layers in onion skin
                 if (layer.isBackground) return;
+                if (layer.frames[frameIndex] && layer.frames[frameIndex].referenceImage) return;
                 
                 if (layer.visible && layer.frames[frameIndex]) {
                     layer.frames[frameIndex].paths.forEach(pathData => {
@@ -1938,7 +2057,7 @@ function renderFrame() {
                 }
             });
             
-            onionSkinLayer.appendChild(prevGroup);
+            layersContainer.appendChild(prevGroup);
         }
         
         // Draw next frames (multiple)
@@ -1955,8 +2074,9 @@ function renderFrame() {
             nextGroup.setAttribute('class', `onion-next onion-next-${i}`);
             
             state.layers.forEach(layer => {
-                // Skip background layers in onion skin
+                // Skip background layers and reference layers in onion skin
                 if (layer.isBackground) return;
+                if (layer.frames[frameIndex] && layer.frames[frameIndex].referenceImage) return;
                 
                 if (layer.visible && layer.frames[frameIndex]) {
                     layer.frames[frameIndex].paths.forEach(pathData => {
@@ -1972,13 +2092,18 @@ function renderFrame() {
                 }
             });
             
-            onionSkinLayer.appendChild(nextGroup);
+            layersContainer.appendChild(nextGroup);
         }
     } else {
     }
     
-    // Draw current frame - composite all layers at current frame index
+    // Second pass: render drawing layers (non-reference)
     state.layers.forEach(layer => {
+        // Skip layers already rendered in the reference pass
+        const frameToCheck = layer.isBackground ? layer.frames[0] : layer.frames[state.currentFrameIndex];
+        const hasReference = frameToCheck && frameToCheck.referenceImage;
+        if (hasReference) return;
+
         const layerGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         layerGroup.setAttribute('id', `layer-${layer.id}-group`);
         
@@ -2008,6 +2133,18 @@ function renderFrame() {
             }
         }
         
+        // Draw reference image if present
+        if (frameToRender && frameToRender.referenceImage) {
+            const img = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+            img.setAttribute('href', frameToRender.referenceImage);
+            img.setAttribute('x', '0');
+            img.setAttribute('y', '0');
+            img.setAttribute('width', state.canvasWidth);
+            img.setAttribute('height', state.canvasHeight);
+            img.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+            layerGroup.appendChild(img);
+        }
+
         // Draw frame
         if (frameToRender && frameToRender.paths) {
             frameToRender.paths.forEach(pathData => {
@@ -2060,11 +2197,23 @@ function selectTool(tool) {
     document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
     if (tool === 'pen') {
         document.getElementById('penTool').classList.add('active');
+        svg.style.cursor = 'crosshair';
     } else if (tool === 'eraser') {
         document.getElementById('eraserTool').classList.add('active');
+        svg.style.cursor = 'crosshair';
     } else if (tool === 'select') {
         document.getElementById('selectTool').classList.add('active');
         svg.classList.add('select-mode');
+        svg.style.cursor = '';
+    } else if (tool === 'zoom') {
+        document.getElementById('zoomTool').classList.add('active');
+        svg.style.cursor = 'zoom-in';
+        document.getElementById('zoomHint').style.display = '';
+    }
+    
+    // Hide zoom hint when leaving zoom tool
+    if (tool !== 'zoom') {
+        document.getElementById('zoomHint').style.display = 'none';
     }
 }
 
@@ -2618,8 +2767,19 @@ function redo() {
 // ==================== LOCAL STORAGE ====================
 function saveToLocalStorage() {
     try {
+        // Strip reference images from save data (too large for localStorage)
+        const layersForSave = state.layers.map(layer => ({
+            ...layer,
+            frames: layer.frames.map(frame => {
+                if (frame.referenceImage) {
+                    return { paths: frame.paths };
+                }
+                return frame;
+            })
+        }));
+
         const saveData = {
-            layers: state.layers,
+            layers: layersForSave,
             currentLayerId: state.currentLayerId,
             currentFrameIndex: state.currentFrameIndex,
             maxFrames: state.maxFrames,
@@ -2628,7 +2788,7 @@ function saveToLocalStorage() {
             backgroundColor: state.backgroundColor,
             onionSkinEnabled: state.onionSkinEnabled,
             onionSkinSettings: state.onionSkinSettings,
-            version: '4.2' // Updated version with onion skin settings
+            version: '4.3'
         };
         localStorage.setItem('vectorAnimationToolData', JSON.stringify(saveData));
     } catch (e) {
@@ -2643,7 +2803,7 @@ function loadFromLocalStorage() {
             const data = JSON.parse(savedData);
             
             // Check if data has layer-centric structure
-            if ((data.version === '4.0' || data.version === '4.1' || data.version === '4.2') && data.layers && data.layers[0] && data.layers[0].frames) {
+            if ((data.version === '4.0' || data.version === '4.1' || data.version === '4.2' || data.version === '4.3') && data.layers && data.layers[0] && data.layers[0].frames) {
                 state.layers = data.layers;
                 // Ensure opacity exists on all layers (data migration)
                 state.layers.forEach(l => { if (l.opacity === undefined) l.opacity = 1; });
@@ -2707,6 +2867,9 @@ function newProject() {
     document.getElementById('backgroundRect').setAttribute('fill', '#ffffff');
     document.getElementById('fpsSelect').value = '12';
     document.getElementById('canvasSizeSelect').value = '600x600';
+    state.zoom = 1;
+    state.panX = 0;
+    state.panY = 0;
     document.getElementById('colorPicker').value = '#000000';
     document.getElementById('backgroundColorPicker').value = '#ffffff';
     document.getElementById('transparentBgToggle').checked = false;
@@ -2725,7 +2888,7 @@ function exportProject() {
         layers: state.layers,
         fps: state.fps,
         backgroundColor: state.backgroundColor,
-        version: '4.1',
+        version: '4.3',
         format: 'vector-svg-layer-timelines'
     };
     
@@ -3133,9 +3296,29 @@ async function renderFrameToCanvas(ctx, frameIndex) {
         // Apply layer opacity for export
         const layerOpacity = layer.opacity !== undefined ? layer.opacity : 1;
         ctx.globalAlpha = layerOpacity;
+
+        const frame = layer.frames[frameIndex];
+
+        // Draw reference image if present
+        if (frame.referenceImage) {
+            await new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    const scale = Math.min(ctx.canvas.width / img.width, ctx.canvas.height / img.height);
+                    const dw = img.width * scale;
+                    const dh = img.height * scale;
+                    const dx = (ctx.canvas.width - dw) / 2;
+                    const dy = (ctx.canvas.height - dh) / 2;
+                    ctx.drawImage(img, dx, dy, dw, dh);
+                    resolve();
+                };
+                img.onerror = resolve;
+                img.src = frame.referenceImage;
+            });
+        }
         
         // Render each path in the frame
-        for (const pathData of layer.frames[frameIndex].paths) {
+        for (const pathData of frame.paths) {
             ctx.strokeStyle = pathData.stroke;
             ctx.lineWidth = parseFloat(pathData.strokeWidth);
             ctx.lineCap = 'round';
@@ -3286,6 +3469,480 @@ function showDownloadModal(files) {
     });
 }
 
+
+// ==================== ZOOM & PAN ====================
+function applyZoom() {
+    // panX/panY are screen pixel offsets from the SVG's natural centered position
+    svg.style.transformOrigin = 'center center';
+    svg.style.transform = 'translate(' + state.panX + 'px, ' + state.panY + 'px) scale(' + state.zoom + ')';
+    updateZoomUI();
+}
+
+function resetZoom() {
+    state.zoom = 1;
+    state.panX = 0;
+    state.panY = 0;
+    
+    // Remove all inline styles to let CSS handle positioning
+    svg.removeAttribute('style');
+    
+    // Reset viewBox to canvas dimensions
+    svg.setAttribute('viewBox', '0 0 ' + state.canvasWidth + ' ' + state.canvasHeight);
+    svg.setAttribute('width', state.canvasWidth);
+    svg.setAttribute('height', state.canvasHeight);
+    
+    // Force browser reflow so the flex centering recalculates
+    svg.offsetHeight;
+    
+    updateZoomUI();
+}
+
+function updateZoomUI() {
+    const pct = Math.round(state.zoom * 100);
+    const label = document.getElementById('zoomLabel');
+    if (label) label.textContent = pct + '%';
+}
+
+function handleZoomToolClick(e) {
+    // Click to zoom in, shift/alt+click to zoom out
+    const zoomIn = !(e.altKey || e.shiftKey);
+    const factor = zoomIn ? 2 : 0.5;
+    const newZoom = Math.max(0.25, Math.min(16, state.zoom * factor));
+    
+    // Get where the user clicked relative to the SVG center on screen
+    const rect = svg.getBoundingClientRect();
+    const svgCenterX = rect.left + rect.width / 2;
+    const svgCenterY = rect.top + rect.height / 2;
+    
+    // Vector from SVG center to click point (in screen pixels)
+    const dx = e.clientX - svgCenterX;
+    const dy = e.clientY - svgCenterY;
+    
+    // Adjust pan so clicked point moves toward center
+    const scaleFactor = newZoom / state.zoom;
+    state.panX = state.panX * scaleFactor - dx * (scaleFactor - 1);
+    state.panY = state.panY * scaleFactor - dy * (scaleFactor - 1);
+    
+    state.zoom = newZoom;
+    applyZoom();
+}
+
+function handleZoomToolDrag(e) {
+    // Drag to pan when in zoom tool
+    if (state.isPanning && state.panStart) {
+        state.panX = state.panStartView.x + (e.clientX - state.panStart.x);
+        state.panY = state.panStartView.y + (e.clientY - state.panStart.y);
+        applyZoom();
+    }
+}
+
+function setupZoomControls() {
+    // Reset zoom buttons
+    const resetBtn = document.getElementById('zoomResetBtn');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', resetZoom);
+    }
+    const resetHintBtn = document.getElementById('zoomResetHintBtn');
+    if (resetHintBtn) {
+        resetHintBtn.addEventListener('click', resetZoom);
+    }
+
+    // Zoom tool button
+    document.getElementById('zoomTool').addEventListener('click', () => selectTool('zoom'));
+    
+    // Pinch to zoom on touch (always active)
+    const canvasZone = document.querySelector('.canvas-zone');
+    canvasZone.addEventListener('pointerup', (e) => {
+        if (state.isPanning && state.tool === 'zoom') {
+            state.isPanning = false;
+        }
+        removePinchPointer(e);
+    });
+    canvasZone.addEventListener('pointercancel', (e) => {
+        if (state.isPanning && state.tool === 'zoom') {
+            state.isPanning = false;
+        }
+        removePinchPointer(e);
+    });
+    canvasZone.addEventListener('pointermove', (e) => {
+        if (state.tool === 'zoom') {
+            handleZoomToolDrag(e);
+        }
+        if (e.pointerType === 'touch') {
+            handlePinchMove(e);
+        }
+    });
+}
+
+// ==================== PINCH TO ZOOM ====================
+let _pinchPointers = [];
+
+function handlePinchMove(e) {
+    const idx = _pinchPointers.findIndex(p => p.pointerId === e.pointerId);
+    if (idx >= 0) {
+        _pinchPointers[idx] = { pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+    } else {
+        _pinchPointers.push({ pointerId: e.pointerId, x: e.clientX, y: e.clientY });
+    }
+    
+    if (_pinchPointers.length < 2) return;
+    
+    const p1 = _pinchPointers[0];
+    const p2 = _pinchPointers[1];
+    const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    const centerX = (p1.x + p2.x) / 2;
+    const centerY = (p1.y + p2.y) / 2;
+    
+    if (state.pinchStartDist === null) {
+        state.pinchStartDist = dist;
+        state.pinchStartZoom = state.zoom;
+        state.panStart = { x: centerX, y: centerY };
+        state.panStartView = { x: state.panX, y: state.panY };
+        return;
+    }
+    
+    const scale = dist / state.pinchStartDist;
+    const newZoom = Math.max(0.25, Math.min(16, state.pinchStartZoom * scale));
+    
+    // Pan follows the pinch center
+    state.panX = state.panStartView.x + (centerX - state.panStart.x);
+    state.panY = state.panStartView.y + (centerY - state.panStart.y);
+    state.zoom = newZoom;
+    applyZoom();
+}
+
+function removePinchPointer(e) {
+    _pinchPointers = _pinchPointers.filter(p => p.pointerId !== e.pointerId);
+    if (_pinchPointers.length < 2) {
+        state.pinchStartDist = null;
+        state.pinchStartZoom = null;
+    }
+}
+
+// ==================== VIDEO IMPORT ====================
+let _videoImportState = {
+    videoUrl: null,
+    duration: 0,
+    trimStart: 0,
+    trimEnd: 0,
+    fps: 12,
+    opacity: 0.4
+};
+
+function handleVideoFileSelect(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = ''; // Reset so same file can be re-selected
+
+    // Revoke any previous URL
+    if (_videoImportState.videoUrl) {
+        URL.revokeObjectURL(_videoImportState.videoUrl);
+    }
+
+    const url = URL.createObjectURL(file);
+    _videoImportState.videoUrl = url;
+
+    const video = document.getElementById('videoPreview');
+    const placeholder = document.getElementById('videoPreviewPlaceholder');
+    placeholder.textContent = 'Loading video...';
+    placeholder.style.display = 'block';
+
+    video.src = url;
+    video.onloadedmetadata = () => {
+        _videoImportState.duration = video.duration;
+        _videoImportState.trimStart = 0;
+        _videoImportState.trimEnd = Math.min(video.duration, 10);
+
+        // Set up trim sliders
+        const startSlider = document.getElementById('videoTrimStart');
+        const endSlider = document.getElementById('videoTrimEnd');
+        startSlider.max = video.duration;
+        startSlider.step = 0.1;
+        startSlider.value = 0;
+        endSlider.max = video.duration;
+        endSlider.step = 0.1;
+        endSlider.value = _videoImportState.trimEnd;
+
+        // Set FPS to match project
+        const fpsSelect = document.getElementById('videoImportFps');
+        const projectFps = state.fps.toString();
+        for (let i = 0; i < fpsSelect.options.length; i++) {
+            fpsSelect.options[i].text = fpsSelect.options[i].value === projectFps
+                ? fpsSelect.options[i].value + ' (project)'
+                : fpsSelect.options[i].value;
+        }
+        if ([...fpsSelect.options].some(o => o.value === projectFps)) {
+            fpsSelect.value = projectFps;
+        }
+        _videoImportState.fps = parseInt(fpsSelect.value);
+
+        // Opacity
+        document.getElementById('videoRefOpacity').value = 40;
+        document.getElementById('videoRefOpacityVal').textContent = '40%';
+        _videoImportState.opacity = 0.4;
+
+        placeholder.style.display = 'none';
+        updateVideoImportUI();
+        openVideoImportPanel();
+    };
+
+    video.onerror = () => {
+        placeholder.textContent = 'Could not load video';
+        openVideoImportPanel();
+    };
+}
+
+function openVideoImportPanel() {
+    document.getElementById('videoImportPanel').style.display = 'flex';
+
+    // Wire up controls
+    const startSlider = document.getElementById('videoTrimStart');
+    const endSlider = document.getElementById('videoTrimEnd');
+    const fpsSelect = document.getElementById('videoImportFps');
+    const opacitySlider = document.getElementById('videoRefOpacity');
+    const video = document.getElementById('videoPreview');
+
+    startSlider.oninput = () => {
+        let v = parseFloat(startSlider.value);
+        if (v >= _videoImportState.trimEnd - 0.1) {
+            v = _videoImportState.trimEnd - 0.1;
+            startSlider.value = v;
+        }
+        _videoImportState.trimStart = v;
+        video.currentTime = v;
+        updateVideoImportUI();
+    };
+
+    endSlider.oninput = () => {
+        let v = parseFloat(endSlider.value);
+        if (v <= _videoImportState.trimStart + 0.1) {
+            v = _videoImportState.trimStart + 0.1;
+            endSlider.value = v;
+        }
+        // Cap at 10s range
+        if (v - _videoImportState.trimStart > 10) {
+            v = _videoImportState.trimStart + 10;
+            endSlider.value = v;
+        }
+        _videoImportState.trimEnd = v;
+        video.currentTime = v;
+        updateVideoImportUI();
+    };
+
+    fpsSelect.onchange = () => {
+        _videoImportState.fps = parseInt(fpsSelect.value);
+        updateVideoImportUI();
+    };
+
+    opacitySlider.oninput = () => {
+        const v = parseInt(opacitySlider.value);
+        _videoImportState.opacity = v / 100;
+        document.getElementById('videoRefOpacityVal').textContent = v + '%';
+    };
+
+    document.getElementById('videoImportCancelBtn').onclick = closeVideoImportPanel;
+    document.getElementById('videoImportCloseBtn').onclick = closeVideoImportPanel;
+    document.getElementById('videoImportBackdrop').onclick = closeVideoImportPanel;
+    document.getElementById('videoImportConfirmBtn').onclick = startVideoFrameExtraction;
+}
+
+function closeVideoImportPanel() {
+    document.getElementById('videoImportPanel').style.display = 'none';
+    if (_videoImportState.videoUrl) {
+        URL.revokeObjectURL(_videoImportState.videoUrl);
+        _videoImportState.videoUrl = null;
+    }
+    document.getElementById('videoPreview').src = '';
+}
+
+function updateVideoImportUI() {
+    const dur = _videoImportState.trimEnd - _videoImportState.trimStart;
+    const frames = Math.ceil(dur * _videoImportState.fps);
+    const estMB = (frames * 60).toFixed(0); // ~60KB per JPEG frame estimate
+
+    document.getElementById('videoTrimStartVal').textContent = _videoImportState.trimStart.toFixed(1) + 's';
+    document.getElementById('videoTrimEndVal').textContent = _videoImportState.trimEnd.toFixed(1) + 's';
+    document.getElementById('videoFrameEstimate').textContent = frames + ' frames';
+
+    const info = document.getElementById('videoImportInfo');
+    if (dur > 10) {
+        info.textContent = 'Maximum 10 seconds. Adjust the trim range.';
+        info.style.color = '#e53e3e';
+    } else {
+        info.textContent = dur.toFixed(1) + 's duration • ~' + (estMB > 1000 ? (estMB/1000).toFixed(1) + 'MB' : estMB + 'KB') + ' estimated';
+        info.style.color = '';
+    }
+}
+
+async function startVideoFrameExtraction() {
+    const video = document.getElementById('videoPreview');
+    const dur = _videoImportState.trimEnd - _videoImportState.trimStart;
+    const fps = _videoImportState.fps;
+    const totalFrames = Math.ceil(dur * fps);
+
+    if (totalFrames < 1) return;
+    if (totalFrames > 300) {
+        if (!confirm('This will extract ' + totalFrames + ' frames which may use a lot of memory. Continue?')) return;
+    }
+
+    // Show progress
+    const progress = document.getElementById('videoImportProgress');
+    const progressFill = document.getElementById('videoProgressFill');
+    const progressText = document.getElementById('videoProgressText');
+    const confirmBtn = document.getElementById('videoImportConfirmBtn');
+    const cancelBtn = document.getElementById('videoImportCancelBtn');
+    progress.style.display = 'flex';
+    confirmBtn.disabled = true;
+    cancelBtn.disabled = true;
+    confirmBtn.textContent = 'Extracting...';
+
+    // Robust seek: wait for seeked event with timeout, then wait an extra frame
+    function seekTo(targetTime) {
+        return new Promise((resolve) => {
+            const clampedTime = Math.min(Math.max(targetTime, 0), video.duration);
+            let resolved = false;
+            const done = () => {
+                if (resolved) return;
+                resolved = true;
+                // Wait one extra animation frame to ensure the video frame is painted
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        resolve();
+                    });
+                });
+            };
+            video.addEventListener('seeked', done, { once: true });
+            video.currentTime = clampedTime;
+            // Fallback timeout — if seeked never fires
+            setTimeout(done, 1000);
+        });
+    }
+
+    // Create extraction canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = state.canvasWidth;
+    canvas.height = state.canvasHeight;
+    const ctx = canvas.getContext('2d');
+
+    const frames = [];
+    let success = true;
+
+    try {
+        for (let i = 0; i < totalFrames; i++) {
+            const time = _videoImportState.trimStart + (i / fps);
+
+            await seekTo(time);
+
+            // Draw video frame to canvas, fitting to canvas dimensions
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const vw = video.videoWidth || canvas.width;
+            const vh = video.videoHeight || canvas.height;
+            const scale = Math.min(canvas.width / vw, canvas.height / vh);
+            const dw = vw * scale;
+            const dh = vh * scale;
+            const dx = (canvas.width - dw) / 2;
+            const dy = (canvas.height - dh) / 2;
+
+            try {
+                ctx.drawImage(video, dx, dy, dw, dh);
+            } catch (err) {
+                // If drawImage fails, push a blank frame
+                console.error('drawImage failed at frame ' + i, err);
+            }
+
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+            frames.push(dataUrl);
+
+            // Update progress
+            const pct = ((i + 1) / totalFrames * 100);
+            progressFill.style.width = pct + '%';
+            progressText.textContent = 'Extracting frame ' + (i + 1) + ' of ' + totalFrames;
+
+            // Yield to keep UI responsive every frame
+            await new Promise(r => setTimeout(r, 5));
+        }
+    } catch (err) {
+        console.error('Video extraction error:', err);
+        success = false;
+    }
+
+    // Reset UI
+    progress.style.display = 'none';
+    progressFill.style.width = '0%';
+    confirmBtn.disabled = false;
+    cancelBtn.disabled = false;
+    confirmBtn.textContent = 'Import Frames';
+
+    if (success && frames.length > 0) {
+        // Close panel and clean up video
+        try {
+            document.getElementById('videoImportPanel').style.display = 'none';
+        } catch(e) {}
+        if (_videoImportState.videoUrl) {
+            URL.revokeObjectURL(_videoImportState.videoUrl);
+            _videoImportState.videoUrl = null;
+        }
+        video.src = '';
+        video.removeAttribute('src');
+        video.load();
+
+        // Then create the layer
+        createVideoReferenceLayer(frames);
+    } else {
+        // Failed - just show a message
+        const indicator = document.getElementById('autoSaveIndicator');
+        if (indicator) {
+            indicator.textContent = 'Import failed';
+            indicator.classList.add('visible');
+            setTimeout(function() { indicator.classList.remove('visible'); }, 2000);
+        }
+    }
+}
+
+function createVideoReferenceLayer(frameDataUrls) {
+    state.layerIdCounter++;
+
+    const newLayer = {
+        id: 'layer-' + state.layerIdCounter,
+        name: 'Video Reference',
+        visible: true,
+        opacity: _videoImportState.opacity,
+        isBackground: false,
+        frames: frameDataUrls.map(dataUrl => ({
+            paths: [],
+            referenceImage: dataUrl
+        }))
+    };
+
+    // Insert at bottom (renders behind everything)
+    state.layers.unshift(newLayer);
+
+    // Select a drawing layer, not the reference
+    if (state.layers.length > 1) {
+        state.currentLayerId = state.layers[1].id;
+    } else {
+        state.currentLayerId = newLayer.id;
+    }
+
+    // Ensure other layers have enough frames
+    state.maxFrames = Math.max(state.maxFrames, newLayer.frames.length);
+    updateMaxFrames();
+
+    state.currentFrameIndex = 0;
+
+    updateLayerList();
+    updateFrameList();
+    updateFrameCounter();
+    renderFrame();
+
+    // Use lightweight indicator instead of modal
+    const indicator = document.getElementById('autoSaveIndicator');
+    if (indicator) {
+        indicator.textContent = 'Imported ' + frameDataUrls.length + ' reference frames';
+        indicator.classList.add('visible');
+        setTimeout(function() { indicator.classList.remove('visible'); }, 3000);
+    }
+}
 
 // ==================== FRAME COPY/PASTE ====================
 function copyFrame() {

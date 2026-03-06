@@ -64,6 +64,9 @@
             <button id="newProjectBtn" class="header-btn">New</button>
             <input type="file" id="fileInput" accept=".json" style="display: none;">
             <div class="header-divider"></div>
+            <button id="importVideoBtn" class="header-btn">Import Video</button>
+            <input type="file" id="videoFileInput" accept="video/*" style="display: none;">
+            <div class="header-divider"></div>
             <button id="shortcutsBtn" class="header-btn shortcuts-btn" title="Keyboard Shortcuts (?)">
                 <span class="icon">?</span>
             </button>
@@ -93,6 +96,14 @@
                         <path d="M4 2l10 7-4 1 3 6-2 1-3-6-4 3z" fill="currentColor" stroke="none"/>
                     </svg>
                     <span class="tool-label">Select</span>
+                </button>
+                <button id="zoomTool" class="tool-btn" title="Zoom (Z)">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="9" cy="9" r="6"/>
+                        <path d="M13.5 13.5L17 17"/>
+                        <path d="M7 9h4M9 7v4" stroke-width="1.5"/>
+                    </svg>
+                    <span class="tool-label">Zoom</span>
                 </button>
             </div>
 
@@ -175,6 +186,13 @@
                 <g id="layersContainer"></g>
                 <g id="selectionOverlay"></g>
             </svg>
+            <div class="zoom-bar">
+                <button id="zoomResetBtn" class="zoom-label-btn" title="Reset Zoom (0)"><span id="zoomLabel">100%</span></button>
+            </div>
+            <div id="zoomHint" class="zoom-hint" style="display: none;">
+                <span>Click to zoom in · Shift+click to zoom out · Drag to pan</span>
+                <button id="zoomResetHintBtn" class="zoom-reset-hint-btn">Reset View</button>
+            </div>
         </main>
     </div>
 
@@ -344,6 +362,7 @@
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>B</kbd></span><span class="shortcut-desc">Pen / Brush</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>E</kbd></span><span class="shortcut-desc">Eraser</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>V</kbd></span><span class="shortcut-desc">Select</span></div>
+                    <div class="shortcut-row"><span class="shortcut-keys"><kbd>Z</kbd></span><span class="shortcut-desc">Zoom (click to zoom in, Shift+click to zoom out)</span></div>
                 </div>
                 <div class="shortcuts-group">
                     <h4>Drawing</h4>
@@ -375,6 +394,65 @@
                 <div class="shortcuts-group">
                     <h4>View</h4>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>O</kbd></span><span class="shortcut-desc">Toggle onion skin</span></div>
+                    <div class="shortcut-row"><span class="shortcut-keys"><kbd>Z</kbd></span><span class="shortcut-desc">Zoom tool</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Import Dialog -->
+    <div id="videoImportPanel" class="shortcuts-panel" style="display: none;">
+        <div class="shortcuts-backdrop" id="videoImportBackdrop"></div>
+        <div class="shortcuts-dialog video-import-dialog">
+            <div class="shortcuts-header">
+                <h3>Import Video as Reference</h3>
+                <button class="shortcuts-close" id="videoImportCloseBtn">&times;</button>
+            </div>
+            <div class="video-import-body">
+                <div class="video-preview-container">
+                    <video id="videoPreview" muted playsinline></video>
+                    <div class="video-preview-placeholder" id="videoPreviewPlaceholder">
+                        Loading video...
+                    </div>
+                </div>
+                <div class="video-trim-controls">
+                    <div class="trim-row">
+                        <label>Start</label>
+                        <input type="range" id="videoTrimStart" min="0" max="100" step="0.1" value="0" class="trim-slider">
+                        <span id="videoTrimStartVal" class="trim-value">0.0s</span>
+                    </div>
+                    <div class="trim-row">
+                        <label>End</label>
+                        <input type="range" id="videoTrimEnd" min="0" max="100" step="0.1" value="100" class="trim-slider">
+                        <span id="videoTrimEndVal" class="trim-value">0.0s</span>
+                    </div>
+                    <div class="trim-row">
+                        <label>FPS</label>
+                        <select id="videoImportFps" class="video-import-select">
+                            <option value="6">6</option>
+                            <option value="8">8</option>
+                            <option value="12" selected>12 (project)</option>
+                            <option value="15">15</option>
+                            <option value="24">24</option>
+                        </select>
+                        <span id="videoFrameEstimate" class="trim-value">0 frames</span>
+                    </div>
+                    <div class="trim-row">
+                        <label>Opacity</label>
+                        <input type="range" id="videoRefOpacity" min="10" max="100" step="5" value="40" class="trim-slider">
+                        <span id="videoRefOpacityVal" class="trim-value">40%</span>
+                    </div>
+                </div>
+                <div class="video-import-info" id="videoImportInfo"></div>
+                <div class="video-import-progress" id="videoImportProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="videoProgressFill"></div>
+                    </div>
+                    <span class="progress-text" id="videoProgressText">Extracting frames...</span>
+                </div>
+                <div class="video-import-actions">
+                    <button class="modal-btn secondary" id="videoImportCancelBtn">Cancel</button>
+                    <button class="modal-btn primary" id="videoImportConfirmBtn">Import Frames</button>
                 </div>
             </div>
         </div>
