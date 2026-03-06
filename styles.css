@@ -1194,15 +1194,63 @@ body {
     opacity: 1;
 }
 
+/* Frame drag reorder */
+.frame-item.frame-dragging {
+    opacity: 0.5;
+    transform: scale(0.95);
+    z-index: 10;
+}
+
+.frame-item.frame-drop-before {
+    border-left: 3px solid var(--accent);
+}
+
+.frame-item.frame-drop-after {
+    border-right: 3px solid var(--accent);
+}
+
 /* Frame tap area for touch devices */
 .frame-tap-area {
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
-    bottom: 0;
+    bottom: 16px;
     z-index: 1;
     cursor: pointer;
+}
+
+/* Frame drag handle */
+.frame-drag-handle {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.08);
+    color: var(--text-tertiary);
+    font-size: 10px;
+    letter-spacing: 1px;
+    cursor: grab;
+    z-index: 2;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: background 0.1s ease;
+}
+
+.frame-drag-handle:hover {
+    background: rgba(0,0,0,0.15);
+    color: var(--text-secondary);
+}
+
+.frame-dragging .frame-drag-handle {
+    cursor: grabbing;
+    background: var(--accent-bg);
+    color: var(--accent);
 }
 
 /* Hold controls (+/- buttons on frame) */

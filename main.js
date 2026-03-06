@@ -39,6 +39,7 @@ const state = {
     pinchStartDist: null,
     pinchStartZoom: null,
     spaceHeld: false,
+    activePenId: null, // Tracks active stylus for palm rejection
     onionSkinEnabled: true,
     onionSkinSettings: {
         framesBefore: 1,
@@ -52,6 +53,7 @@ const state = {
     playInterval: null,
     fps: 12,
     frameClipboard: null,
+    frameDrag: null,
     undoStack: [],
     redoStack: [],
     selection: {
@@ -285,8 +287,22 @@ function setupEventListeners() {
     });
 
     // Color picker
+    document.getElementById('colorPicker').addEventListener('input', (e) => {
+        state.strokeColor = e.target.value;
+        
+        // If paths are selected, update their colours live
+        if (state.tool === 'select' && state.selection && state.selection.indices.length > 0) {
+            applyColorToSelection(e.target.value);
+        }
+    });
     document.getElementById('colorPicker').addEventListener('change', (e) => {
         state.strokeColor = e.target.value;
+        
+        // Final colour commit for selected paths
+        if (state.tool === 'select' && state.selection && state.selection.indices.length > 0) {
+            applyColorToSelection(e.target.value);
+            saveToLocalStorage();
+        }
     });
     
     // Smoothing slider
@@ -543,6 +559,12 @@ function setupEventListeners() {
     });
     document.getElementById('videoFileInput').addEventListener('change', handleVideoFileSelect);
 
+    // Image import
+    document.getElementById('importImagesBtn').addEventListener('click', () => {
+        document.getElementById('imageFileInput').click();
+    });
+    document.getElementById('imageFileInput').addEventListener('change', handleImageFileSelect);
+
     // Auto-save every 10 seconds
     setInterval(saveToLocalStorage, 10000);
 
@@ -701,6 +723,13 @@ function handleKeyboardShortcut(e) {
     if (e.key === 'e' || e.key === 'E') {
         e.preventDefault();
         selectTool('eraser');
+        return;
+    }
+    
+    // G key - switch to fill tool
+    if (e.key === 'g' || e.key === 'G') {
+        e.preventDefault();
+        selectTool('fill');
         return;
     }
     
@@ -1215,6 +1244,14 @@ function startDrawing(e) {
     
     if (state.isPlaying) return;
     
+    // Palm rejection: if a stylus/pen is active, ignore touch input
+    if (e.pointerType === 'pen') {
+        state.activePenId = e.pointerId;
+    }
+    if (e.pointerType === 'touch' && state.activePenId !== null) {
+        return;
+    }
+    
     // Don't draw if panning (space+drag or middle mouse)
     if (state.isPanning) return;
     
@@ -1239,6 +1276,12 @@ function startDrawing(e) {
             state.panStartView = { x: state.panX, y: state.panY };
             state._zoomClickPos = { x: e.clientX, y: e.clientY };
         }
+        return;
+    }
+    
+    // Fill tool: click on a path to recolour it, or empty space for a filled rect
+    if (state.tool === 'fill') {
+        handleFillToolClick(e);
         return;
     }
     
@@ -1309,6 +1352,11 @@ function startDrawing(e) {
 function draw(e) {
     // Prevent default touch behaviors
     e.preventDefault();
+    
+    // Palm rejection: ignore touch when pen is active
+    if (e.pointerType === 'touch' && state.activePenId !== null) {
+        return;
+    }
     
     // Select tool handles its own pointer events
     if (state.tool === 'select') {
@@ -1562,6 +1610,15 @@ function stopDrawing(e) {
     // Clean up pinch tracking
     if (e && e.pointerType === 'touch') {
         removePinchPointer(e);
+    }
+    
+    // Palm rejection: clear pen state when pen lifts, ignore touch while pen active
+    if (e && e.pointerType === 'pen' && e.pointerId === state.activePenId) {
+        // Delay clearing so any trailing touch events are still rejected
+        setTimeout(function() { state.activePenId = null; }, 300);
+    }
+    if (e && e.pointerType === 'touch' && state.activePenId !== null) {
+        return;
     }
     
     // Select tool handles its own pointer events
@@ -2209,6 +2266,9 @@ function selectTool(tool) {
         document.getElementById('zoomTool').classList.add('active');
         svg.style.cursor = 'zoom-in';
         document.getElementById('zoomHint').style.display = '';
+    } else if (tool === 'fill') {
+        document.getElementById('fillTool').classList.add('active');
+        svg.style.cursor = 'crosshair';
     }
     
     // Hide zoom hint when leaving zoom tool
@@ -2480,16 +2540,84 @@ function updateFrameList() {
         
         frameItem.appendChild(thumbSvg);
         
-        // Add touch-friendly tap area overlay (doesn't block other elements)
+        // Tap area for click to select
         const tapArea = document.createElement('div');
         tapArea.className = 'frame-tap-area';
-        tapArea.addEventListener('click', (e) => {
-            // Only trigger if not clicking on buttons
+        tapArea.addEventListener('click', function(e) {
             if (!e.target.classList.contains('hold-btn')) {
                 selectFrame(index);
             }
         });
         frameItem.appendChild(tapArea);
+        
+        // Drag handle at bottom
+        const dragHandle = document.createElement('div');
+        dragHandle.className = 'frame-drag-handle';
+        dragHandle.innerHTML = '⠿';
+        dragHandle.title = 'Drag to reorder';
+        frameItem.appendChild(dragHandle);
+        
+        // Drag to reorder (on handle only)
+        (function(dragIndex) {
+            let startX = 0;
+            let isDragging = false;
+            
+            dragHandle.addEventListener('pointerdown', function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                startX = ev.clientX;
+                isDragging = true;
+                frameItem.classList.add('frame-dragging');
+                try { dragHandle.setPointerCapture(ev.pointerId); } catch(err) {}
+            });
+            
+            dragHandle.addEventListener('pointermove', function(ev) {
+                if (!isDragging) return;
+                
+                var items = frameList.querySelectorAll('.frame-item');
+                var target = dragIndex;
+                for (var i = 0; i < items.length; i++) {
+                    var r = items[i].getBoundingClientRect();
+                    var mid = r.left + r.width / 2;
+                    if (ev.clientX > mid) target = i;
+                }
+                for (var i = 0; i < items.length; i++) {
+                    items[i].classList.remove('frame-drop-before', 'frame-drop-after');
+                }
+                if (target !== dragIndex && items[target]) {
+                    items[target].classList.add(target > dragIndex ? 'frame-drop-after' : 'frame-drop-before');
+                }
+            });
+            
+            dragHandle.addEventListener('pointerup', function(ev) {
+                if (!isDragging) return;
+                isDragging = false;
+                frameItem.classList.remove('frame-dragging');
+                try { dragHandle.releasePointerCapture(ev.pointerId); } catch(err) {}
+                
+                var items = frameList.querySelectorAll('.frame-item');
+                var target = dragIndex;
+                for (var i = 0; i < items.length; i++) {
+                    var r = items[i].getBoundingClientRect();
+                    var mid = r.left + r.width / 2;
+                    if (ev.clientX > mid) target = i;
+                    items[i].classList.remove('frame-drop-before', 'frame-drop-after');
+                }
+                
+                if (target !== dragIndex) {
+                    reorderFrame(dragIndex, target);
+                }
+            });
+            
+            dragHandle.addEventListener('pointercancel', function() {
+                isDragging = false;
+                frameItem.classList.remove('frame-dragging');
+                var items = frameList.querySelectorAll('.frame-item');
+                for (var i = 0; i < items.length; i++) {
+                    items[i].classList.remove('frame-drop-before', 'frame-drop-after');
+                }
+            });
+        })(index);
         
         // Add frame number
         const frameNumber = document.createElement('div');
@@ -2540,6 +2668,31 @@ function updateFrameList() {
         
         frameList.appendChild(frameItem);
     });
+}
+
+function reorderFrame(fromIndex, toIndex) {
+    const currentLayer = getCurrentLayer();
+    if (!currentLayer) return;
+    
+    saveStateForUndo();
+    
+    const frame = currentLayer.frames.splice(fromIndex, 1)[0];
+    currentLayer.frames.splice(toIndex, 0, frame);
+    
+    // Update current frame index to follow the moved frame
+    if (state.currentFrameIndex === fromIndex) {
+        state.currentFrameIndex = toIndex;
+    } else if (fromIndex < state.currentFrameIndex && toIndex >= state.currentFrameIndex) {
+        state.currentFrameIndex--;
+    } else if (fromIndex > state.currentFrameIndex && toIndex <= state.currentFrameIndex) {
+        state.currentFrameIndex++;
+    }
+    
+    state.redoStack = [];
+    updateFrameList();
+    updateFrameCounter();
+    renderFrame();
+    saveToLocalStorage();
 }
 
 function updateFrameCounter() {
@@ -3319,21 +3472,29 @@ async function renderFrameToCanvas(ctx, frameIndex) {
         
         // Render each path in the frame
         for (const pathData of frame.paths) {
-            ctx.strokeStyle = pathData.stroke;
-            ctx.lineWidth = parseFloat(pathData.strokeWidth);
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            
-            // Handle eraser tool (draws white, but we need to use composite operation)
+            // Handle eraser tool
             if (pathData.tool === 'eraser') {
                 ctx.globalCompositeOperation = 'destination-out';
             } else {
                 ctx.globalCompositeOperation = 'source-over';
             }
             
-            // Draw the path
             const path2D = new Path2D(pathData.d);
-            ctx.stroke(path2D);
+            
+            // Fill if path has a fill colour
+            if (pathData.fill && pathData.fill !== 'none') {
+                ctx.fillStyle = pathData.fill;
+                ctx.fill(path2D);
+            }
+            
+            // Stroke if path has a stroke colour
+            if (pathData.stroke && pathData.stroke !== 'none') {
+                ctx.strokeStyle = pathData.stroke;
+                ctx.lineWidth = parseFloat(pathData.strokeWidth) || 1;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.stroke(path2D);
+            }
         }
     }
     
@@ -3549,6 +3710,9 @@ function setupZoomControls() {
 
     // Zoom tool button
     document.getElementById('zoomTool').addEventListener('click', () => selectTool('zoom'));
+    
+    // Fill tool button
+    document.getElementById('fillTool').addEventListener('click', () => selectTool('fill'));
     
     // Pinch to zoom on touch (always active)
     const canvasZone = document.querySelector('.canvas-zone');
@@ -3944,6 +4108,160 @@ function createVideoReferenceLayer(frameDataUrls) {
     }
 }
 
+// ==================== IMAGE IMPORT ====================
+function handleImageFileSelect(e) {
+    const files = Array.from(e.target.files);
+    e.target.value = ''; // Reset so same files can be re-selected
+    
+    if (files.length === 0) return;
+    
+    // Sort files by name for correct sequence order
+    files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    
+    if (files.length === 1) {
+        // Single image — ask how to import
+        importSingleImage(files[0]);
+    } else {
+        // Multiple images — import as sequence
+        importImageSequence(files);
+    }
+}
+
+function importSingleImage(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const dataUrl = e.target.result;
+        
+        // Load image to get dimensions for proper scaling
+        const img = new Image();
+        img.onload = () => {
+            // Scale to fit canvas while preserving aspect ratio
+            const scaledUrl = scaleImageToCanvas(img);
+            
+            // Create a reference layer with one frame
+            createImageReferenceLayer([scaledUrl], file.name);
+        };
+        img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+}
+
+function importImageSequence(files) {
+    const indicator = document.getElementById('autoSaveIndicator');
+    if (indicator) {
+        indicator.textContent = 'Importing ' + files.length + ' images...';
+        indicator.classList.add('visible');
+    }
+    
+    let loaded = 0;
+    const frameUrls = new Array(files.length);
+    
+    files.forEach((file, index) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const dataUrl = e.target.result;
+            const img = new Image();
+            img.onload = () => {
+                frameUrls[index] = scaleImageToCanvas(img);
+                loaded++;
+                
+                if (indicator) {
+                    indicator.textContent = 'Loading image ' + loaded + ' of ' + files.length;
+                }
+                
+                if (loaded === files.length) {
+                    // All loaded — filter out any nulls from failed loads
+                    const validFrames = frameUrls.filter(url => url);
+                    if (validFrames.length > 0) {
+                        createImageReferenceLayer(validFrames, 'Image Sequence');
+                    }
+                    if (indicator) {
+                        indicator.classList.remove('visible');
+                    }
+                }
+            };
+            img.onerror = () => {
+                loaded++;
+                if (loaded === files.length) {
+                    const validFrames = frameUrls.filter(url => url);
+                    if (validFrames.length > 0) {
+                        createImageReferenceLayer(validFrames, 'Image Sequence');
+                    }
+                    if (indicator) {
+                        indicator.classList.remove('visible');
+                    }
+                }
+            };
+            img.src = dataUrl;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+function scaleImageToCanvas(img) {
+    // Scale image to fit canvas dimensions, centred
+    const canvas = document.createElement('canvas');
+    canvas.width = state.canvasWidth;
+    canvas.height = state.canvasHeight;
+    const ctx = canvas.getContext('2d');
+    
+    const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+    const dw = img.width * scale;
+    const dh = img.height * scale;
+    const dx = (canvas.width - dw) / 2;
+    const dy = (canvas.height - dh) / 2;
+    
+    ctx.drawImage(img, dx, dy, dw, dh);
+    return canvas.toDataURL('image/jpeg', 0.8);
+}
+
+function createImageReferenceLayer(frameDataUrls, name) {
+    state.layerIdCounter++;
+
+    const newLayer = {
+        id: 'layer-' + state.layerIdCounter,
+        name: name || 'Image Reference',
+        visible: true,
+        opacity: frameDataUrls.length === 1 ? 1 : 0.4,
+        isBackground: false,
+        frames: frameDataUrls.map(dataUrl => ({
+            paths: [],
+            referenceImage: dataUrl
+        }))
+    };
+
+    // Single image: insert at bottom as background-like reference
+    // Sequence: insert at bottom for tracing over
+    state.layers.unshift(newLayer);
+
+    // Select a drawing layer, not the reference
+    if (state.layers.length > 1) {
+        state.currentLayerId = state.layers[1].id;
+    } else {
+        state.currentLayerId = newLayer.id;
+    }
+
+    state.maxFrames = Math.max(state.maxFrames, newLayer.frames.length);
+    updateMaxFrames();
+
+    state.currentFrameIndex = 0;
+
+    updateLayerList();
+    updateFrameList();
+    updateFrameCounter();
+    renderFrame();
+
+    const indicator = document.getElementById('autoSaveIndicator');
+    if (indicator) {
+        const msg = frameDataUrls.length === 1
+            ? 'Image imported as reference layer'
+            : 'Imported ' + frameDataUrls.length + ' frames as reference layer';
+        indicator.textContent = msg;
+        indicator.classList.add('visible');
+        setTimeout(function() { indicator.classList.remove('visible'); }, 3000);
+    }
+}
+
 // ==================== FRAME COPY/PASTE ====================
 function copyFrame() {
     const currentLayer = getCurrentLayer();
@@ -4089,6 +4407,137 @@ function findPathAtPoint(frame, point) {
     return -1;
 }
 
+function handleFillToolClick(e) {
+    const currentLayer = getCurrentLayer();
+    if (!currentLayer || !currentLayer.visible) return;
+    
+    const frameIndex = currentLayer.isBackground ? 0 : state.currentFrameIndex;
+    const frame = currentLayer.frames[frameIndex];
+    if (!frame) return;
+    
+    // Temporarily make all paths in our layer group respond to pointer hit testing
+    const layerGroupId = 'layer-' + currentLayer.id + '-group';
+    const layerGroup = document.getElementById(layerGroupId);
+    
+    let hitIndex = -1;
+    
+    if (layerGroup) {
+        const allPaths = layerGroup.querySelectorAll('path');
+        
+        // Temporarily widen strokes and set pointer-events for hit testing
+        const origValues = [];
+        allPaths.forEach(function(el) {
+            origValues.push({
+                pe: el.getAttribute('pointer-events'),
+                sw: el.getAttribute('stroke-width'),
+                stroke: el.getAttribute('stroke')
+            });
+            el.setAttribute('pointer-events', 'all');
+            // For fill:none paths, temporarily add a wide transparent stroke for hit area
+            if (el.getAttribute('fill') === 'none') {
+                const sw = parseFloat(el.getAttribute('stroke-width')) || 2;
+                el.setAttribute('stroke-width', Math.max(sw, 20));
+            }
+        });
+        
+        // Now use elementsFromPoint
+        const elements = document.elementsFromPoint(e.clientX, e.clientY);
+        
+        for (const el of elements) {
+            if (el.tagName === 'path') {
+                for (let i = 0; i < allPaths.length; i++) {
+                    if (allPaths[i] === el) {
+                        hitIndex = i;
+                        break;
+                    }
+                }
+                if (hitIndex >= 0) break;
+            }
+        }
+        
+        // Restore original values
+        allPaths.forEach(function(el, idx) {
+            if (origValues[idx].pe !== null) {
+                el.setAttribute('pointer-events', origValues[idx].pe);
+            } else {
+                el.removeAttribute('pointer-events');
+            }
+            if (origValues[idx].sw !== null) {
+                el.setAttribute('stroke-width', origValues[idx].sw);
+            }
+        });
+    }
+    
+    if (hitIndex >= 0 && hitIndex < frame.paths.length) {
+        // Recolour the clicked path
+        saveStateForUndo();
+        const pathData = frame.paths[hitIndex];
+        
+        if (pathData.fill && pathData.fill !== 'none') {
+            pathData.fill = state.strokeColor;
+        }
+        if (pathData.stroke && pathData.stroke !== 'none') {
+            pathData.stroke = state.strokeColor;
+        }
+        
+        state.redoStack = [];
+        renderFrame();
+        updateFrameList();
+        saveToLocalStorage();
+    } else {
+        // Clicked on empty space — add a filled rectangle behind everything
+        saveStateForUndo();
+        
+        const w = state.canvasWidth;
+        const h = state.canvasHeight;
+        const rectPath = 'M 0 0 L ' + w + ' 0 L ' + w + ' ' + h + ' L 0 ' + h + ' Z';
+        
+        frame.paths.unshift({
+            d: rectPath,
+            stroke: 'none',
+            strokeWidth: 0,
+            fill: state.strokeColor,
+            tool: 'fill'
+        });
+        
+        state.redoStack = [];
+        renderFrame();
+        updateFrameList();
+        saveToLocalStorage();
+    }
+}
+
+function applyColorToSelection(color) {
+    const frame = getSelectionFrame();
+    if (!frame) return;
+    const sel = state.selection;
+    
+    // Save undo state on first colour change
+    if (!sel._colorUndoSaved) {
+        saveStateForUndo();
+        sel._colorUndoSaved = true;
+        // Reset flag after a short delay (groups rapid picker changes into one undo)
+        setTimeout(function() { sel._colorUndoSaved = false; }, 500);
+    }
+    
+    for (const idx of sel.indices) {
+        if (idx >= frame.paths.length) continue;
+        const pathData = frame.paths[idx];
+        
+        // Update stroke colour
+        if (pathData.stroke && pathData.stroke !== 'none') {
+            pathData.stroke = color;
+        }
+        // Update fill colour (for tapered strokes)
+        if (pathData.fill && pathData.fill !== 'none') {
+            pathData.fill = color;
+        }
+    }
+    
+    renderFrame();
+    drawSelectionOverlay();
+}
+
 function clearSelection() {
     state.selection.indices = [];
     state.selection.bbox = null;
@@ -4151,6 +4600,16 @@ function drawSelectionOverlay() {
     if (sel.indices.length === 0) return;
     const frame = getSelectionFrame();
     if (!frame) return;
+
+    // Sync colour picker to first selected path's colour
+    if (sel.indices.length > 0 && frame.paths[sel.indices[0]]) {
+        const firstPath = frame.paths[sel.indices[0]];
+        const pathColor = (firstPath.fill && firstPath.fill !== 'none') ? firstPath.fill : firstPath.stroke;
+        if (pathColor && pathColor !== 'none') {
+            document.getElementById('colorPicker').value = pathColor;
+            state.strokeColor = pathColor;
+        }
+    }
 
     // Highlight selected paths
     for (const idx of sel.indices) {

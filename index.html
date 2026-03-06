@@ -66,6 +66,8 @@
             <div class="header-divider"></div>
             <button id="importVideoBtn" class="header-btn">Import Video</button>
             <input type="file" id="videoFileInput" accept="video/*" style="display: none;">
+            <button id="importImagesBtn" class="header-btn">Import Images</button>
+            <input type="file" id="imageFileInput" accept="image/*" multiple style="display: none;">
             <div class="header-divider"></div>
             <button id="shortcutsBtn" class="header-btn shortcuts-btn" title="Keyboard Shortcuts (?)">
                 <span class="icon">?</span>
@@ -104,6 +106,14 @@
                         <path d="M7 9h4M9 7v4" stroke-width="1.5"/>
                     </svg>
                     <span class="tool-label">Zoom</span>
+                </button>
+                <button id="fillTool" class="tool-btn" title="Fill (G)">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75">
+                        <path d="M6 14l-3 3h14" stroke-linejoin="round"/>
+                        <path d="M5 13L13 5l2 2-8 8z" fill="currentColor" opacity="0.2" stroke="currentColor"/>
+                        <path d="M16 12c0 0 2 2.5 2 3.5a2 2 0 0 1-4 0c0-1 2-3.5 2-3.5z" fill="currentColor" opacity="0.4" stroke="none"/>
+                    </svg>
+                    <span class="tool-label">Fill</span>
                 </button>
             </div>
 
@@ -363,6 +373,7 @@
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>E</kbd></span><span class="shortcut-desc">Eraser</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>V</kbd></span><span class="shortcut-desc">Select</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>Z</kbd></span><span class="shortcut-desc">Zoom (click to zoom in, Shift+click to zoom out)</span></div>
+                    <div class="shortcut-row"><span class="shortcut-keys"><kbd>G</kbd></span><span class="shortcut-desc">Fill tool</span></div>
                 </div>
                 <div class="shortcuts-group">
                     <h4>Drawing</h4>
