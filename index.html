@@ -80,12 +80,22 @@
         <!-- Left: Drawing Tools Only -->
         <aside class="tool-column">
             <div class="tool-section">
-                <button id="penTool" class="tool-btn active" title="Pen (P)">
+                <button id="penTool" class="tool-btn active" title="Pen (B)">
                     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 17l4-4m0 0l10-10 4 4-10 10m-4-4l-4 4"/>
                     </svg>
                     <span class="tool-label">Pen</span>
                 </button>
+                <div class="brush-type-selector">
+                    <select id="brushType" class="brush-select" title="Brush Style">
+                        <option value="smooth">Smooth</option>
+                        <option value="sketchy">Sketchy</option>
+                        <option value="rough">Rough</option>
+                        <option value="hairy">Hairy</option>
+                        <option value="dotted">Dotted</option>
+                        <option value="stipple">Stipple</option>
+                    </select>
+                </div>
                 <button id="eraserTool" class="tool-btn" title="Eraser (E)">
                     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="4" y="8" width="12" height="8" rx="1"/>

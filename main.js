@@ -23,6 +23,7 @@ const state = {
     altPressed: false, // Track alt/option key for forcing circle mode
     constraintMode: false, // Toggle for touch devices (replaces shift)
     tool: 'pen',
+    brushType: 'smooth',
     strokeSize: 2,
     strokeColor: '#000000',
     smoothing: 3, // Smoothing amount (0.5 = low, 3 = medium, 8 = high)
@@ -284,6 +285,11 @@ function setupEventListeners() {
     document.getElementById('sizeSlider').addEventListener('input', (e) => {
         state.strokeSize = parseInt(e.target.value);
         updateSizeValue();
+    });
+
+    // Brush type selector
+    document.getElementById('brushType').addEventListener('change', (e) => {
+        state.brushType = e.target.value;
     });
 
     // Color picker
@@ -1313,6 +1319,8 @@ function startDrawing(e) {
     
     // Create new path element
     state.currentPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    state.brushGroup = null; // Group for multi-stroke brushes
+    state.brushSeeds = null; // Pre-seeded random values so strokes don't flicker
     
     // ERASER MODE: Draw path that will be used to cut through existing paths
     if (state.tool === 'eraser') {
@@ -1324,8 +1332,8 @@ function startDrawing(e) {
         state.currentPath.setAttribute('opacity', '0.5'); // Semi-transparent preview
     }
     // Dual-mode brush: tapered (filled) vs uniform (stroked)
-    else if (state.taper > 0 && state.tool === 'pen') {
-        // TAPERED MODE: Filled outline path
+    else if (state.taper > 0 && state.tool === 'pen' && state.brushType === 'smooth') {
+        // TAPERED MODE: Filled outline path (only for smooth brush)
         state.currentPath.setAttribute('fill', state.strokeColor);
         state.currentPath.setAttribute('stroke', 'none');
     } else {
@@ -1345,7 +1353,14 @@ function startDrawing(e) {
     // Add to the current layer's group
     const layerGroup = document.getElementById(`layer-${state.currentLayerId}-group`);
     if (layerGroup) {
-        layerGroup.appendChild(state.currentPath);
+        // For non-smooth brushes, create a group to hold multiple strokes
+        if (state.brushType !== 'smooth' && state.tool === 'pen') {
+            state.brushGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            state.brushSeeds = generateBrushSeeds(state.brushType, state.strokeSize);
+            layerGroup.appendChild(state.brushGroup);
+        } else {
+            layerGroup.appendChild(state.currentPath);
+        }
     }
 }
 
@@ -1416,16 +1431,19 @@ function draw(e) {
         const smoothedPoints = isConstrained ? pointsToUse : applyPointAveraging(pointsToUse, state.smoothing);
         
         // Dual-mode brush: tapered vs uniform
-        if (state.taper > 0) {
-            // TAPERED MODE: Generate filled outline path
+        if (state.brushGroup && state.brushSeeds) {
+            // Live-render brush strokes (with taper info)
+            updateLiveBrushStrokes(smoothedPoints, state.brushGroup, state.brushSeeds);
+        } else if (state.taper > 0) {
+            // TAPERED MODE: Generate filled outline path (smooth brush only)
             const pathData = createTaperedPath(
                 smoothedPoints,
                 state.strokeSize,
-                state.taper / 100 // Convert 0-100 to 0-1
+                state.taper / 100
             );
             state.currentPath.setAttribute('d', pathData);
         } else {
-            // UNIFORM MODE: Generate standard stroke path (existing)
+            // UNIFORM MODE: Generate standard stroke path
             const pathData = pointsToPath(smoothedPoints);
             state.currentPath.setAttribute('d', pathData);
         }
@@ -1671,16 +1689,57 @@ function stopDrawing(e) {
                     state.currentPath.parentNode.removeChild(state.currentPath);
                 }
             } else {
-                // PEN MODE: Store the path data (with fill for tapered strokes)
-                const pathData = {
-                    d: state.currentPath.getAttribute('d'),
-                    stroke: state.currentPath.getAttribute('stroke'),
-                    strokeWidth: state.currentPath.getAttribute('stroke-width'),
-                    fill: state.currentPath.getAttribute('fill'), // NEW: Store fill for tapered strokes
-                    tool: state.tool
-                };
-                
-                currentLayer.frames[saveFrameIndex].paths.push(pathData);
+                // PEN MODE: Store the path data
+                if (state.brushGroup && state.brushSeeds && state.brushType !== 'smooth') {
+                    // Save all elements from the live brush group
+                    const groupElements = state.brushGroup.children;
+                    for (var gi = 0; gi < groupElements.length; gi++) {
+                        var el = groupElements[gi];
+                        if (el.tagName === 'path') {
+                            currentLayer.frames[saveFrameIndex].paths.push({
+                                d: el.getAttribute('d'),
+                                stroke: el.getAttribute('stroke'),
+                                strokeWidth: el.getAttribute('stroke-width'),
+                                fill: el.getAttribute('fill') || 'none',
+                                tool: 'pen'
+                            });
+                        } else if (el.tagName === 'circle') {
+                            // Convert circle to a filled path
+                            var cx = parseFloat(el.getAttribute('cx'));
+                            var cy = parseFloat(el.getAttribute('cy'));
+                            var r = parseFloat(el.getAttribute('r'));
+                            // Circle as two arcs
+                            var d = 'M ' + (cx - r) + ' ' + cy +
+                                    ' A ' + r + ' ' + r + ' 0 1 0 ' + (cx + r) + ' ' + cy +
+                                    ' A ' + r + ' ' + r + ' 0 1 0 ' + (cx - r) + ' ' + cy + ' Z';
+                            currentLayer.frames[saveFrameIndex].paths.push({
+                                d: d,
+                                stroke: 'none',
+                                strokeWidth: 0,
+                                fill: el.getAttribute('fill') || state.strokeColor,
+                                tool: 'pen'
+                            });
+                        }
+                    }
+                    // Remove the live group
+                    if (state.brushGroup.parentNode) {
+                        state.brushGroup.parentNode.removeChild(state.brushGroup);
+                    }
+                } else {
+                    const basePathData = {
+                        d: state.currentPath.getAttribute('d'),
+                        stroke: state.currentPath.getAttribute('stroke'),
+                        strokeWidth: state.currentPath.getAttribute('stroke-width'),
+                        fill: state.currentPath.getAttribute('fill'),
+                        tool: state.tool
+                    };
+                    currentLayer.frames[saveFrameIndex].paths.push(basePathData);
+                    // Remove the live preview path
+                    if (state.currentPath.parentNode) {
+                        state.currentPath.parentNode.removeChild(state.currentPath);
+                    }
+                }
+                renderFrame();
             }
             
             // Clear redo stack on new action
@@ -1694,8 +1753,379 @@ function stopDrawing(e) {
     
     state.currentPath = null;
     state.currentPoints = [];
-    state.startPoint = null; // Clear start point
-    state.lastPointerEvent = null; // Clear last event
+    state.brushGroup = null;
+    state.brushSeeds = null;
+    state.startPoint = null;
+    state.lastPointerEvent = null;
+}
+
+// ==================== BRUSH STROKE GENERATION ====================
+function generateBrushSeeds(brushType, baseWidth) {
+    // Pre-generate random values so strokes don't flicker on each update
+    var seeds = { type: brushType, baseWidth: baseWidth, strands: [] };
+    
+    if (brushType === 'sketchy') {
+        for (var i = 0; i < 2; i++) {
+            seeds.strands.push({
+                offsetScale: (i + 1) * baseWidth * 0.3,
+                widthMult: 0.6 + Math.random() * 0.3,
+                jitterSeed: Math.random() * 1000
+            });
+        }
+    } else if (brushType === 'rough') {
+        // Main stroke jitter seed
+        seeds.mainSeed = Math.random() * 1000;
+        var scratchCount = 3 + Math.floor(Math.random() * 3);
+        for (var i = 0; i < scratchCount; i++) {
+            var angle = Math.random() * Math.PI * 2;
+            var dist = baseWidth * (0.3 + Math.random() * 0.7);
+            seeds.strands.push({
+                ox: Math.cos(angle) * dist,
+                oy: Math.sin(angle) * dist,
+                widthMult: 0.15 + Math.random() * 0.25,
+                startFrac: Math.random() * 0.3,
+                lenFrac: 0.4 + Math.random() * 0.6,
+                jitterSeed: Math.random() * 1000
+            });
+        }
+    } else if (brushType === 'hairy') {
+        var strandCount = 5 + Math.floor(baseWidth * 1.5);
+        for (var i = 0; i < strandCount; i++) {
+            var spreadAngle = (i / strandCount) * Math.PI - Math.PI / 2;
+            var spreadDist = baseWidth * (0.1 + (Math.abs(i - strandCount / 2) / strandCount) * 1.2);
+            seeds.strands.push({
+                spreadAngle: spreadAngle,
+                spreadDist: spreadDist,
+                widthMult: 0.08 + Math.random() * 0.15,
+                wobbleSeed: Math.random() * 1000,
+                trimStartFrac: Math.random() * 0.15,
+                trimEndFrac: Math.random() * 0.15
+            });
+        }
+    } else if (brushType === 'dotted') {
+        // Evenly spaced dots along the path
+        seeds.spacing = Math.max(4, baseWidth * 3); // Distance between dots
+        seeds.dotSize = baseWidth * 0.8;
+    } else if (brushType === 'stipple') {
+        // Cloud of random dots scattered around the path
+        seeds.dotSize = Math.max(1, baseWidth * 0.4);
+        seeds.spread = baseWidth * 2;
+        seeds.density = Math.max(3, Math.floor(baseWidth * 0.8)); // dots per point
+        seeds.jitterSeed = Math.random() * 1000;
+    }
+    return seeds;
+}
+
+function seededJitter(seed, index) {
+    // Deterministic pseudo-random based on seed + index
+    var x = Math.sin(seed + index * 127.1) * 43758.5453;
+    return x - Math.floor(x) - 0.5; // Returns -0.5 to 0.5
+}
+
+function updateLiveBrushStrokes(points, group, seeds) {
+    if (points.length < 2) return;
+    
+    group.innerHTML = '';
+    var color = state.strokeColor;
+    var bw = seeds.baseWidth;
+    var taperAmount = state.taper / 100; // 0 to 1
+    
+    // Calculate cumulative distance for taper
+    var totalLen = 0;
+    var cumDists = [0];
+    for (var i = 1; i < points.length; i++) {
+        var dx = points[i].x - points[i-1].x;
+        var dy = points[i].y - points[i-1].y;
+        totalLen += Math.sqrt(dx * dx + dy * dy);
+        cumDists.push(totalLen);
+    }
+    
+    // Taper function: returns scale 0-1 based on position along stroke
+    function taperAt(pointIndex) {
+        if (taperAmount === 0 || totalLen === 0) return 1;
+        var t = cumDists[pointIndex] / totalLen; // 0 to 1 along stroke
+        // Taper from both ends, strongest at the tips
+        var endTaper = 1 - Math.pow(t, 1.5) * taperAmount; // Taper at end
+        var startTaper = 1 - Math.pow(1 - t, 2) * taperAmount * 0.5; // Slight taper at start
+        return Math.max(0.05, endTaper * startTaper);
+    }
+    
+    function makePath(d, sw) {
+        var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        p.setAttribute('d', d);
+        p.setAttribute('stroke', color);
+        p.setAttribute('stroke-width', sw);
+        p.setAttribute('fill', 'none');
+        p.setAttribute('stroke-linecap', 'round');
+        p.setAttribute('stroke-linejoin', 'round');
+        group.appendChild(p);
+    }
+    
+    // For tapered line brushes, we need to break into segments with varying width
+    function makeTaperedStrandPaths(strandPoints, baseStrokeWidth) {
+        if (taperAmount === 0) {
+            makePath(pointsToPath(strandPoints), baseStrokeWidth);
+            return;
+        }
+        // Break into short segments with varying width
+        var segLen = Math.max(3, Math.floor(strandPoints.length / 8));
+        for (var si = 0; si < strandPoints.length - 1; si += segLen) {
+            var segEnd = Math.min(si + segLen + 1, strandPoints.length);
+            var seg = strandPoints.slice(si, segEnd);
+            if (seg.length < 2) continue;
+            var midIdx = Math.min(si + Math.floor(segLen / 2), points.length - 1);
+            // Map strand point index back to original point index (approximate)
+            var origIdx = Math.round((si / strandPoints.length) * (points.length - 1));
+            var tw = baseStrokeWidth * taperAt(origIdx);
+            makePath(pointsToPath(seg), Math.max(0.2, tw));
+        }
+    }
+    
+    if (seeds.type === 'sketchy') {
+        // Main stroke
+        makeTaperedStrandPaths(points, bw);
+        // Offset passes
+        for (var s = 0; s < seeds.strands.length; s++) {
+            var strand = seeds.strands[s];
+            var jittered = points.map(function(p, i) {
+                return {
+                    x: p.x + seededJitter(strand.jitterSeed, i) * strand.offsetScale * 2,
+                    y: p.y + seededJitter(strand.jitterSeed + 50, i) * strand.offsetScale * 2
+                };
+            });
+            makeTaperedStrandPaths(jittered, bw * strand.widthMult);
+        }
+    } else if (seeds.type === 'rough') {
+        // Main jittered stroke
+        var roughPts = points.map(function(p, i) {
+            var j = bw * 0.5;
+            return {
+                x: p.x + seededJitter(seeds.mainSeed, i) * j,
+                y: p.y + seededJitter(seeds.mainSeed + 99, i) * j
+            };
+        });
+        makeTaperedStrandPaths(roughPts, bw);
+        // Scratch lines
+        for (var s = 0; s < seeds.strands.length; s++) {
+            var strand = seeds.strands[s];
+            var startIdx = Math.floor(strand.startFrac * points.length);
+            var endIdx = Math.min(points.length, startIdx + Math.floor(strand.lenFrac * points.length));
+            var subset = points.slice(startIdx, endIdx);
+            if (subset.length < 2) continue;
+            var scratchPts = subset.map(function(p, i) {
+                return {
+                    x: p.x + strand.ox + seededJitter(strand.jitterSeed, i) * bw * 0.4,
+                    y: p.y + strand.oy + seededJitter(strand.jitterSeed + 77, i) * bw * 0.4
+                };
+            });
+            makeTaperedStrandPaths(scratchPts, Math.max(0.5, bw * strand.widthMult));
+        }
+    } else if (seeds.type === 'hairy') {
+        for (var s = 0; s < seeds.strands.length; s++) {
+            var strand = seeds.strands[s];
+            var strandPts = points.map(function(p, i) {
+                var wobble = Math.sin(i * 0.3 + strand.wobbleSeed) * bw * 0.2;
+                var tScale = taperAt(i);
+                return {
+                    x: p.x + Math.cos(strand.spreadAngle) * strand.spreadDist * tScale + wobble,
+                    y: p.y + Math.sin(strand.spreadAngle) * strand.spreadDist * tScale + seededJitter(strand.wobbleSeed, i) * bw * 0.15
+                };
+            });
+            var trimStart = Math.floor(strand.trimStartFrac * strandPts.length);
+            var trimEnd = Math.max(trimStart + 2, strandPts.length - Math.floor(strand.trimEndFrac * strandPts.length));
+            var trimmed = strandPts.slice(trimStart, trimEnd);
+            if (trimmed.length >= 2) {
+                makeTaperedStrandPaths(trimmed, Math.max(0.3, bw * strand.widthMult));
+            }
+        }
+    } else if (seeds.type === 'dotted') {
+        var spacing = seeds.spacing;
+        var dotR = seeds.dotSize;
+        var cumDist2 = 0;
+        var nextDotAt = 0;
+        
+        for (var i = 0; i < points.length; i++) {
+            if (i > 0) {
+                var dx2 = points[i].x - points[i-1].x;
+                var dy2 = points[i].y - points[i-1].y;
+                cumDist2 += Math.sqrt(dx2 * dx2 + dy2 * dy2);
+            }
+            if (cumDist2 >= nextDotAt) {
+                var tScale = taperAt(i);
+                var r = dotR * tScale;
+                if (r > 0.1) {
+                    var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', points[i].x);
+                    circle.setAttribute('cy', points[i].y);
+                    circle.setAttribute('r', r);
+                    circle.setAttribute('fill', color);
+                    circle.setAttribute('stroke', 'none');
+                    group.appendChild(circle);
+                }
+                nextDotAt += spacing;
+            }
+        }
+    } else if (seeds.type === 'stipple') {
+        var dotR2 = seeds.dotSize;
+        var spread = seeds.spread;
+        var density = seeds.density;
+        var jseed = seeds.jitterSeed;
+        
+        var stepSize = Math.max(2, spread * 0.5);
+        var cumDist3 = 0;
+        var nextSampleAt = 0;
+        
+        for (var i = 0; i < points.length; i++) {
+            if (i > 0) {
+                var dx3 = points[i].x - points[i-1].x;
+                var dy3 = points[i].y - points[i-1].y;
+                cumDist3 += Math.sqrt(dx3 * dx3 + dy3 * dy3);
+            }
+            if (cumDist3 >= nextSampleAt) {
+                var tScale = taperAt(i);
+                var localSpread = spread * tScale;
+                var localDensity = Math.max(1, Math.round(density * tScale));
+                
+                for (var d = 0; d < localDensity; d++) {
+                    var dotIdx = i * density + d;
+                    var ox = seededJitter(jseed, dotIdx) * localSpread * 2;
+                    var oy = seededJitter(jseed + 333, dotIdx) * localSpread * 2;
+                    var r = dotR2 * (0.5 + Math.abs(seededJitter(jseed + 777, dotIdx))) * tScale;
+                    
+                    if (r > 0.1) {
+                        var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                        circle.setAttribute('cx', points[i].x + ox);
+                        circle.setAttribute('cy', points[i].y + oy);
+                        circle.setAttribute('r', r);
+                        circle.setAttribute('fill', color);
+                        circle.setAttribute('stroke', 'none');
+                        group.appendChild(circle);
+                    }
+                }
+                nextSampleAt += stepSize;
+            }
+        }
+    }
+}
+
+// Old batch generation (kept for reference, no longer used for live brushes)
+function generateBrushStrokes(points, basePathData, brushType) {
+    if (points.length < 2) return [basePathData];
+    
+    const results = [];
+    const color = basePathData.stroke || basePathData.fill || '#000000';
+    const baseWidth = parseFloat(basePathData.strokeWidth) || 2;
+    
+    if (brushType === 'sketchy') {
+        // SKETCHY: 2-3 slightly offset duplicates of the stroke with varying opacity
+        // Gives a hand-drawn, "gone over it a few times" look
+        results.push(basePathData); // Original stroke
+        
+        for (let pass = 0; pass < 2; pass++) {
+            const offset = (pass + 1) * (baseWidth * 0.3);
+            const jitteredPoints = points.map(function(p) {
+                return {
+                    x: p.x + (Math.random() - 0.5) * offset * 2,
+                    y: p.y + (Math.random() - 0.5) * offset * 2
+                };
+            });
+            const d = pointsToPath(jitteredPoints);
+            results.push({
+                d: d,
+                stroke: color,
+                strokeWidth: baseWidth * (0.6 + Math.random() * 0.3),
+                fill: 'none',
+                tool: 'pen'
+            });
+        }
+    }
+    else if (brushType === 'rough') {
+        // ROUGH: Main stroke with jagged edges + thin scratchy overlay lines
+        // Gives a charcoal / rough pencil feel
+        
+        // Main stroke with jittered points
+        const roughPoints = points.map(function(p, i) {
+            const jitter = baseWidth * 0.5;
+            return {
+                x: p.x + (Math.random() - 0.5) * jitter,
+                y: p.y + (Math.random() - 0.5) * jitter
+            };
+        });
+        results.push({
+            d: pointsToPath(roughPoints),
+            stroke: color,
+            strokeWidth: baseWidth,
+            fill: 'none',
+            tool: 'pen'
+        });
+        
+        // Add 3-5 thin scratchy lines alongside the main stroke
+        const scratchCount = 3 + Math.floor(Math.random() * 3);
+        for (let s = 0; s < scratchCount; s++) {
+            const offsetAngle = Math.random() * Math.PI * 2;
+            const offsetDist = baseWidth * (0.3 + Math.random() * 0.7);
+            const ox = Math.cos(offsetAngle) * offsetDist;
+            const oy = Math.sin(offsetAngle) * offsetDist;
+            
+            // Use a subset of points for variety
+            const startIdx = Math.floor(Math.random() * points.length * 0.3);
+            const endIdx = Math.min(points.length, startIdx + Math.floor(points.length * (0.4 + Math.random() * 0.6)));
+            const subset = points.slice(startIdx, endIdx);
+            if (subset.length < 2) continue;
+            
+            const scratchPoints = subset.map(function(p) {
+                return {
+                    x: p.x + ox + (Math.random() - 0.5) * baseWidth * 0.4,
+                    y: p.y + oy + (Math.random() - 0.5) * baseWidth * 0.4
+                };
+            });
+            results.push({
+                d: pointsToPath(scratchPoints),
+                stroke: color,
+                strokeWidth: Math.max(0.5, baseWidth * (0.15 + Math.random() * 0.25)),
+                fill: 'none',
+                tool: 'pen'
+            });
+        }
+    }
+    else if (brushType === 'hairy') {
+        // HAIRY: Many thin strands splaying out from the main path
+        // Gives a dry brush / paintbrush feel
+        
+        const strandCount = 5 + Math.floor(baseWidth * 1.5);
+        
+        for (let s = 0; s < strandCount; s++) {
+            // Each strand has a consistent offset from the main path
+            const spreadAngle = (s / strandCount) * Math.PI - Math.PI / 2;
+            const spreadDist = baseWidth * (0.1 + (Math.abs(s - strandCount / 2) / strandCount) * 1.2);
+            
+            const strandPoints = points.map(function(p, i) {
+                // Strands wobble slightly along their length
+                const wobble = Math.sin(i * 0.3 + s) * baseWidth * 0.2;
+                return {
+                    x: p.x + Math.cos(spreadAngle) * spreadDist + wobble,
+                    y: p.y + Math.sin(spreadAngle) * spreadDist + (Math.random() - 0.5) * baseWidth * 0.15
+                };
+            });
+            
+            if (strandPoints.length < 2) continue;
+            
+            // Some strands are shorter (don't go full length)
+            const trimStart = Math.floor(Math.random() * strandPoints.length * 0.15);
+            const trimEnd = Math.max(trimStart + 2, strandPoints.length - Math.floor(Math.random() * strandPoints.length * 0.15));
+            const trimmed = strandPoints.slice(trimStart, trimEnd);
+            
+            results.push({
+                d: pointsToPath(trimmed),
+                stroke: color,
+                strokeWidth: Math.max(0.3, baseWidth * (0.08 + Math.random() * 0.15)),
+                fill: 'none',
+                tool: 'pen'
+            });
+        }
+    }
+    
+    return results;
 }
 
 // Apply eraser cut - save eraser stroke as a background-colored path
