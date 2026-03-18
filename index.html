@@ -72,6 +72,15 @@
             <button id="shortcutsBtn" class="header-btn shortcuts-btn" title="Keyboard Shortcuts (?)">
                 <span class="icon">?</span>
             </button>
+            <button id="darkModeBtn" class="header-btn shortcuts-btn" title="Toggle Dark Mode">
+                <svg id="darkModeIconLight" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                    <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3.05 3.05l1.06 1.06M11.89 11.89l1.06 1.06M3.05 12.95l1.06-1.06M11.89 4.11l1.06-1.06"/>
+                    <circle cx="8" cy="8" r="3"/>
+                </svg>
+                <svg id="darkModeIconDark" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="display:none">
+                    <path d="M13.5 8.5a5.5 5.5 0 0 1-7-7 5.5 5.5 0 1 0 7 7z"/>
+                </svg>
+            </button>
         </div>
     </header>
 
@@ -343,6 +352,9 @@
             </div>
 
             <div class="frames-section">
+                <div class="frame-scrub-bar" id="frameScrubBar" title="Drag to scrub through frames">
+                    <div class="frame-scrub-handle" id="frameScrubHandle"></div>
+                </div>
                 <div class="frames-scroll" id="frameList">
                     <!-- Frame thumbnails inserted here -->
                 </div>

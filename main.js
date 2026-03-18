@@ -577,10 +577,25 @@ function setupEventListeners() {
     // Zoom & Pan
     setupZoomControls();
 
+    // Frame scrub bar
+    setupFrameScrubBar();
+
     // Keyboard shortcuts help panel
     document.getElementById('shortcutsBtn').addEventListener('click', toggleShortcutsPanel);
     document.getElementById('shortcutsCloseBtn').addEventListener('click', closeShortcutsPanel);
     document.querySelector('.shortcuts-backdrop').addEventListener('click', closeShortcutsPanel);
+    
+    // Dark mode toggle
+    document.getElementById('darkModeBtn').addEventListener('click', toggleDarkMode);
+    // Restore dark mode preference
+    if (localStorage.getItem('animframe-dark-mode') === 'true') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        document.getElementById('darkModeIconLight').style.display = '';
+        document.getElementById('darkModeIconDark').style.display = 'none';
+    } else {
+        document.getElementById('darkModeIconLight').style.display = 'none';
+        document.getElementById('darkModeIconDark').style.display = '';
+    }
     
     // Detect Mac and swap modifier labels
     const isMacPlatform = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -860,12 +875,14 @@ function addLayer() {
         name: `Layer ${layerNum}`,
         visible: true,
         opacity: 1,
-        frames: [{ paths: [] }] // Start with one empty frame
+        frames: [{ paths: [] }]
     };
     
     state.layers.push(newLayer);
     state.currentLayerId = newLayer.id;
+    state.currentFrameIndex = 0;
     
+    updateMaxFrames();
     updateLayerList();
     updateFrameList();
     renderFrame();
@@ -1018,34 +1035,83 @@ function updateLayerList() {
             updateLayerList();
         });
         
-        // Layer reorder buttons (up/down arrows)
-        const reorderControls = document.createElement('div');
-        reorderControls.className = 'layer-reorder';
+        // Layer drag handle for reordering
+        const dragHandle = document.createElement('div');
+        dragHandle.className = 'layer-drag-handle';
+        dragHandle.innerHTML = '⠿';
+        dragHandle.title = 'Drag to reorder';
+        dragHandle.addEventListener('click', (e) => e.stopPropagation());
         
-        // Up arrow (move layer up in visual list = move forward in render order)
-        const upBtn = document.createElement('button');
-        upBtn.className = 'layer-arrow-btn';
-        upBtn.innerHTML = '▲';
-        upBtn.title = 'Move layer up';
-        upBtn.disabled = reversedIndex === 0; // Can't move top layer up
-        upBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            moveLayerUp(layer.id);
-        });
-        
-        // Down arrow (move layer down in visual list = move backward in render order)
-        const downBtn = document.createElement('button');
-        downBtn.className = 'layer-arrow-btn';
-        downBtn.innerHTML = '▼';
-        downBtn.title = 'Move layer down';
-        downBtn.disabled = reversedIndex === reversedLayers.length - 1; // Can't move bottom layer down
-        downBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            moveLayerDown(layer.id);
-        });
-        
-        reorderControls.appendChild(upBtn);
-        reorderControls.appendChild(downBtn);
+        (function(layerId, itemElement) {
+            var startY = 0;
+            var isDragging = false;
+            
+            dragHandle.addEventListener('pointerdown', function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                startY = ev.clientY;
+                isDragging = true;
+                itemElement.classList.add('layer-dragging');
+                try { dragHandle.setPointerCapture(ev.pointerId); } catch(err) {}
+            });
+            
+            dragHandle.addEventListener('pointermove', function(ev) {
+                if (!isDragging) return;
+                var items = layerList.querySelectorAll('.layer-item');
+                var targetIdx = -1;
+                for (var i = 0; i < items.length; i++) {
+                    var r = items[i].getBoundingClientRect();
+                    if (ev.clientY < r.top + r.height / 2) { targetIdx = i; break; }
+                }
+                if (targetIdx === -1) targetIdx = items.length - 1;
+                var currentIdx = Array.from(items).indexOf(itemElement);
+                items.forEach(function(item) { item.classList.remove('layer-drop-above', 'layer-drop-below'); });
+                if (targetIdx !== currentIdx && items[targetIdx]) {
+                    items[targetIdx].classList.add(targetIdx < currentIdx ? 'layer-drop-above' : 'layer-drop-below');
+                }
+            });
+            
+            var endDrag = function(ev) {
+                if (!isDragging) return;
+                isDragging = false;
+                itemElement.classList.remove('layer-dragging');
+                try { dragHandle.releasePointerCapture(ev.pointerId); } catch(err) {}
+                
+                var items = layerList.querySelectorAll('.layer-item');
+                items.forEach(function(item) { item.classList.remove('layer-drop-above', 'layer-drop-below'); });
+                
+                var targetIdx = -1;
+                for (var i = 0; i < items.length; i++) {
+                    var r = items[i].getBoundingClientRect();
+                    if (ev.clientY < r.top + r.height / 2) { targetIdx = i; break; }
+                }
+                if (targetIdx === -1) targetIdx = items.length - 1;
+                var currentIdx = Array.from(items).indexOf(itemElement);
+                if (targetIdx === currentIdx) return;
+                
+                // Visual list is reversed: visual 0 = last in state.layers
+                var total = state.layers.length;
+                var fromState = state.layers.findIndex(function(l) { return l.id === layerId; });
+                var toState = total - 1 - targetIdx;
+                if (fromState === toState || fromState < 0) return;
+                
+                var moved = state.layers.splice(fromState, 1)[0];
+                state.layers.splice(toState, 0, moved);
+                
+                updateLayerList();
+                renderFrame();
+                saveToLocalStorage();
+            };
+            
+            dragHandle.addEventListener('pointerup', endDrag);
+            dragHandle.addEventListener('pointercancel', function() {
+                isDragging = false;
+                itemElement.classList.remove('layer-dragging');
+                layerList.querySelectorAll('.layer-item').forEach(function(item) {
+                    item.classList.remove('layer-drop-above', 'layer-drop-below');
+                });
+            });
+        })(layer.id, layerItem);
         
         // Layer name
         const nameSpan = document.createElement('span');
@@ -1140,7 +1206,7 @@ function updateLayerList() {
         const topRow = document.createElement('div');
         topRow.className = 'layer-top-row';
         topRow.appendChild(checkbox);
-        topRow.appendChild(reorderControls);
+        topRow.appendChild(dragHandle);
         topRow.appendChild(nameSpan);
         topRow.appendChild(bgLabel);
         topRow.appendChild(frameCount);
@@ -2730,23 +2796,17 @@ function addFrame() {
     const currentLayer = getCurrentLayer();
     if (!currentLayer) return;
     
-    // Insert new frame after current frame position
-    // If current frame doesn't exist in this layer, add to end
     const insertIndex = state.currentFrameIndex + 1;
     
     if (insertIndex <= currentLayer.frames.length) {
-        // Insert after current frame
         currentLayer.frames.splice(insertIndex, 0, { paths: [] });
         state.currentFrameIndex = insertIndex;
     } else {
-        // Add to end if current index is beyond layer's frames
         currentLayer.frames.push({ paths: [] });
         state.currentFrameIndex = currentLayer.frames.length - 1;
     }
     
-    // Update max frames
     updateMaxFrames();
-    
     updateFrameList();
     updateFrameCounter();
     renderFrame();
@@ -2877,17 +2937,17 @@ function deleteFrame() {
     const currentLayer = getCurrentLayer();
     
     if (!currentLayer || currentLayer.frames.length === 1) {
-        showAlert('Cannot delete the only frame on this layer!', 'Error');
+        showAlert('Cannot delete the only frame!', 'Error');
         return;
     }
     
     if (!currentLayer.frames[state.currentFrameIndex]) {
-        showAlert('No frame at this position on current layer!', 'Error');
+        showAlert('No frame at this position!', 'Error');
         return;
     }
     
     showConfirm(
-        'Delete this frame from current layer?',
+        'Delete this frame?',
         'Delete Frame',
         () => {
             currentLayer.frames.splice(state.currentFrameIndex, 1);
@@ -2912,6 +2972,7 @@ function selectFrame(index) {
     state.currentFrameIndex = index;
     updateFrameList();
     updateFrameCounter();
+    updateScrubHandle();
     renderFrame();
 }
 
@@ -2940,7 +3001,7 @@ function updateFrameList() {
         const thumbSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         thumbSvg.setAttribute('width', '80');
         thumbSvg.setAttribute('height', '60');
-        thumbSvg.setAttribute('viewBox', '0 0 800 600');
+        thumbSvg.setAttribute('viewBox', '0 0 ' + state.canvasWidth + ' ' + state.canvasHeight);
         thumbSvg.style.background = 'white';
         
         // Get the frame to display (handle held frames)
@@ -2949,24 +3010,13 @@ function updateFrameList() {
             frameToDisplay = currentLayer.frames[frame.holdReference] || frame;
         }
         
-        // Show composite of all visible layers at this frame
-        state.layers.forEach(layer => {
-            if (layer.visible && layer.frames[index]) {
-                let layerFrame = layer.frames[index];
-                
-                // Handle held frames for this layer too
-                if (layerFrame.holdReference !== undefined) {
-                    layerFrame = layer.frames[layerFrame.holdReference] || layerFrame;
-                }
-                
-                if (layerFrame.paths) {
-                    layerFrame.paths.forEach(pathData => {
-                        const path = createPathElement(pathData);
-                        thumbSvg.appendChild(path);
-                    });
-                }
-            }
-        });
+        // Show only the current layer's content for this frame
+        if (frameToDisplay.paths) {
+            frameToDisplay.paths.forEach(pathData => {
+                const path = createPathElement(pathData);
+                thumbSvg.appendChild(path);
+            });
+        }
         
         frameItem.appendChild(thumbSvg);
         
@@ -3070,6 +3120,8 @@ function updateFrameList() {
                 addHoldFrame(index);
             });
             
+            holdControls.appendChild(addBtn);
+            
             // Remove hold button (-) - only show if frame has holds
             if (frame.hold && frame.hold > 0) {
                 const removeBtn = document.createElement('button');
@@ -3082,8 +3134,6 @@ function updateFrameList() {
                 });
                 holdControls.appendChild(removeBtn);
             }
-            
-            holdControls.appendChild(addBtn);
             frameItem.appendChild(holdControls);
         }
         
@@ -3131,6 +3181,7 @@ function updateFrameCounter() {
     
     document.getElementById('frameCounter').textContent = 
         `${state.currentFrameIndex + 1}/${frameCount}`;
+    updateScrubHandle();
 }
 
 // ==================== PLAYBACK ====================
@@ -4061,6 +4112,113 @@ function showDownloadModal(files) {
 }
 
 
+// ==================== FRAME SCRUB BAR ====================
+function setupFrameScrubBar() {
+    var bar = document.getElementById('frameScrubBar');
+    if (!bar) return;
+    
+    var isScrubbing = false;
+    
+    function scrubAtX(clientX) {
+        // Find which frame thumbnail is under this X position
+        var frameList = document.getElementById('frameList');
+        var items = frameList.querySelectorAll('.frame-item');
+        if (items.length === 0) return;
+        
+        // Account for scroll position
+        var scrollLeft = frameList.scrollLeft;
+        var listRect = frameList.getBoundingClientRect();
+        
+        var bestIdx = 0;
+        var bestDist = Infinity;
+        
+        for (var i = 0; i < items.length; i++) {
+            var r = items[i].getBoundingClientRect();
+            var mid = r.left + r.width / 2;
+            var dist = Math.abs(clientX - mid);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestIdx = i;
+            }
+        }
+        
+        if (bestIdx !== state.currentFrameIndex) {
+            selectFrame(bestIdx);
+        }
+    }
+    
+    bar.addEventListener('pointerdown', function(e) {
+        e.preventDefault();
+        isScrubbing = true;
+        try { bar.setPointerCapture(e.pointerId); } catch(err) {}
+        scrubAtX(e.clientX);
+    });
+    
+    bar.addEventListener('pointermove', function(e) {
+        if (!isScrubbing) return;
+        scrubAtX(e.clientX);
+    });
+    
+    bar.addEventListener('pointerup', function(e) {
+        isScrubbing = false;
+    });
+    
+    bar.addEventListener('pointercancel', function(e) {
+        isScrubbing = false;
+    });
+    
+    // Sync scroll between scrub bar ticks and frame list
+    var frameList = document.getElementById('frameList');
+    frameList.addEventListener('scroll', function() {
+        updateScrubBar();
+    });
+}
+
+function updateScrubBar() {
+    var bar = document.getElementById('frameScrubBar');
+    if (!bar) return;
+    
+    var currentLayer = getCurrentLayer();
+    if (!currentLayer) return;
+    
+    var frameList = document.getElementById('frameList');
+    var items = frameList.querySelectorAll('.frame-item');
+    var handle = document.getElementById('frameScrubHandle');
+    
+    // Build tick marks aligned with frame thumbnails
+    var ticksContainer = bar.querySelector('.frame-scrub-ticks');
+    if (!ticksContainer) {
+        ticksContainer = document.createElement('div');
+        ticksContainer.className = 'frame-scrub-ticks';
+        bar.appendChild(ticksContainer);
+    }
+    ticksContainer.innerHTML = '';
+    
+    var barRect = bar.getBoundingClientRect();
+    
+    for (var i = 0; i < items.length; i++) {
+        var itemRect = items[i].getBoundingClientRect();
+        var tick = document.createElement('div');
+        tick.className = 'frame-scrub-tick';
+        if (i === state.currentFrameIndex) tick.className += ' active';
+        tick.style.width = itemRect.width + 'px';
+        tick.style.marginLeft = (i === 0 ? (itemRect.left - barRect.left) + 'px' : 'var(--space-2)');
+        tick.textContent = (i + 1);
+        ticksContainer.appendChild(tick);
+    }
+    
+    // Position handle at current frame
+    if (items.length > 0 && items[state.currentFrameIndex]) {
+        var activeRect = items[state.currentFrameIndex].getBoundingClientRect();
+        var handleLeft = activeRect.left - barRect.left + activeRect.width / 2 - 1;
+        handle.style.left = handleLeft + 'px';
+    }
+}
+
+function updateScrubHandle() {
+    updateScrubBar();
+}
+
 // ==================== ZOOM & PAN ====================
 function applyZoom() {
     // panX/panY are screen pixel offsets from the SVG's natural centered position
@@ -4845,96 +5003,207 @@ function handleFillToolClick(e) {
     const frame = currentLayer.frames[frameIndex];
     if (!frame) return;
     
-    // Temporarily make all paths in our layer group respond to pointer hit testing
-    const layerGroupId = 'layer-' + currentLayer.id + '-group';
-    const layerGroup = document.getElementById(layerGroupId);
+    const point = getSvgPoint(e);
+    const px = Math.round(point.x);
+    const py = Math.round(point.y);
+    const w = state.canvasWidth;
+    const h = state.canvasHeight;
     
-    let hitIndex = -1;
+    if (px < 0 || py < 0 || px >= w || py >= h) return;
     
-    if (layerGroup) {
-        const allPaths = layerGroup.querySelectorAll('path');
+    // Step 1: Render all visible layers to an offscreen canvas
+    var renderCanvas = document.createElement('canvas');
+    renderCanvas.width = w;
+    renderCanvas.height = h;
+    var rctx = renderCanvas.getContext('2d');
+    
+    rctx.fillStyle = state.backgroundColor || '#ffffff';
+    rctx.fillRect(0, 0, w, h);
+    
+    state.layers.forEach(function(layer) {
+        if (!layer.visible) return;
+        var fi = layer.isBackground ? 0 : state.currentFrameIndex;
+        var f = layer.frames[fi];
+        if (!f) return;
+        if (f.holdReference !== undefined) f = layer.frames[f.holdReference] || f;
         
-        // Temporarily widen strokes and set pointer-events for hit testing
-        const origValues = [];
-        allPaths.forEach(function(el) {
-            origValues.push({
-                pe: el.getAttribute('pointer-events'),
-                sw: el.getAttribute('stroke-width'),
-                stroke: el.getAttribute('stroke')
+        var layerOpacity = layer.opacity !== undefined ? layer.opacity : 1;
+        rctx.globalAlpha = layerOpacity;
+        
+        if (f.paths) {
+            f.paths.forEach(function(pathData) {
+                if (!pathData.d) return;
+                var path2D = new Path2D(pathData.d);
+                rctx.globalCompositeOperation = pathData.tool === 'eraser' ? 'destination-out' : 'source-over';
+                if (pathData.fill && pathData.fill !== 'none') {
+                    rctx.fillStyle = pathData.fill;
+                    rctx.fill(path2D);
+                }
+                if (pathData.stroke && pathData.stroke !== 'none') {
+                    rctx.strokeStyle = pathData.stroke;
+                    rctx.lineWidth = parseFloat(pathData.strokeWidth) || 2;
+                    rctx.lineCap = 'round';
+                    rctx.lineJoin = 'round';
+                    rctx.stroke(path2D);
+                }
             });
-            el.setAttribute('pointer-events', 'all');
-            // For fill:none paths, temporarily add a wide transparent stroke for hit area
-            if (el.getAttribute('fill') === 'none') {
-                const sw = parseFloat(el.getAttribute('stroke-width')) || 2;
-                el.setAttribute('stroke-width', Math.max(sw, 20));
+        }
+    });
+    rctx.globalAlpha = 1;
+    rctx.globalCompositeOperation = 'source-over';
+    
+    // Step 2: Flood fill
+    var imageData = rctx.getImageData(0, 0, w, h);
+    var data = imageData.data;
+    var startIdx = (py * w + px) * 4;
+    var startR = data[startIdx], startG = data[startIdx+1], startB = data[startIdx+2], startA = data[startIdx+3];
+    var fillColor = hexToRgb(state.strokeColor);
+    
+    if (Math.abs(startR - fillColor.r) < 5 && Math.abs(startG - fillColor.g) < 5 && Math.abs(startB - fillColor.b) < 5) return;
+    
+    var tolerance = 32;
+    function colourMatch(idx) {
+        return Math.abs(data[idx] - startR) <= tolerance &&
+               Math.abs(data[idx+1] - startG) <= tolerance &&
+               Math.abs(data[idx+2] - startB) <= tolerance &&
+               Math.abs(data[idx+3] - startA) <= tolerance;
+    }
+    
+    var fillMask = new Uint8Array(w * h);
+    var stack = [[px, py]];
+    
+    while (stack.length > 0) {
+        var coord = stack.pop();
+        var x = coord[0], y = coord[1];
+        if (x < 0 || x >= w || y < 0 || y >= h) continue;
+        var mi = y * w + x;
+        if (fillMask[mi]) continue;
+        if (!colourMatch(mi * 4)) continue;
+        
+        var lx = x;
+        while (lx > 0 && !fillMask[y * w + (lx-1)] && colourMatch((y * w + (lx-1)) * 4)) lx--;
+        var rx = x;
+        while (rx < w-1 && !fillMask[y * w + (rx+1)] && colourMatch((y * w + (rx+1)) * 4)) rx++;
+        
+        for (var fx = lx; fx <= rx; fx++) {
+            fillMask[y * w + fx] = 1;
+            if (y > 0 && !fillMask[(y-1) * w + fx] && colourMatch(((y-1) * w + fx) * 4)) stack.push([fx, y-1]);
+            if (y < h-1 && !fillMask[(y+1) * w + fx] && colourMatch(((y+1) * w + fx) * 4)) stack.push([fx, y+1]);
+        }
+    }
+    
+    // Step 2.5: Dilate mask to fill under stroke edges
+    for (var pass = 0; pass < 3; pass++) {
+        var expanded = new Uint8Array(w * h);
+        for (var dy = 0; dy < h; dy++) {
+            for (var dx = 0; dx < w; dx++) {
+                if (fillMask[dy * w + dx]) { expanded[dy * w + dx] = 1; continue; }
+                if ((dx > 0 && fillMask[dy * w + (dx-1)]) || (dx < w-1 && fillMask[dy * w + (dx+1)]) ||
+                    (dy > 0 && fillMask[(dy-1) * w + dx]) || (dy < h-1 && fillMask[(dy+1) * w + dx])) {
+                    expanded[dy * w + dx] = 1;
+                }
             }
-        });
-        
-        // Now use elementsFromPoint
-        const elements = document.elementsFromPoint(e.clientX, e.clientY);
-        
-        for (const el of elements) {
-            if (el.tagName === 'path') {
-                for (let i = 0; i < allPaths.length; i++) {
-                    if (allPaths[i] === el) {
-                        hitIndex = i;
-                        break;
+        }
+        fillMask = expanded;
+    }
+    
+    // Step 3: Trace contours
+    var contours = traceContours(fillMask, w, h);
+    if (contours.length === 0) return;
+    
+    // Step 4: Build SVG path
+    var pathD = '';
+    for (var c = 0; c < contours.length; c++) {
+        var pts = simplifyContour(contours[c], 1.5);
+        if (pts.length < 3) continue;
+        pathD += 'M ' + pts[0][0] + ' ' + pts[0][1];
+        for (var j = 1; j < pts.length; j++) pathD += ' L ' + pts[j][0] + ' ' + pts[j][1];
+        pathD += ' Z ';
+    }
+    if (!pathD) return;
+    
+    // Step 5: Insert fill path behind strokes
+    saveStateForUndo();
+    var insertIdx = 0;
+    for (var i = 0; i < frame.paths.length; i++) {
+        if (frame.paths[i].tool === 'fill') insertIdx = i + 1; else break;
+    }
+    frame.paths.splice(insertIdx, 0, { d: pathD, stroke: 'none', strokeWidth: 0, fill: state.strokeColor, tool: 'fill' });
+    
+    state.redoStack = [];
+    renderFrame();
+    updateFrameList();
+    saveToLocalStorage();
+}
+
+function hexToRgb(hex) {
+    var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? { r: parseInt(result[1],16), g: parseInt(result[2],16), b: parseInt(result[3],16) } : { r:0, g:0, b:0 };
+}
+
+function traceContours(mask, w, h) {
+    var contours = [];
+    var visited = new Uint8Array(w * h);
+    var dirs = [[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]];
+    
+    for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+            if (!mask[y * w + x]) continue;
+            if (visited[y * w + x]) continue;
+            if (x > 0 && x < w-1 && y > 0 && y < h-1 &&
+                mask[y*w+(x-1)] && mask[y*w+(x+1)] && mask[(y-1)*w+x] && mask[(y+1)*w+x]) continue;
+            
+            var contour = [];
+            var cx = x, cy = y, dir = 0, steps = 0, maxSteps = w * h;
+            
+            do {
+                contour.push([cx, cy]);
+                visited[cy * w + cx] = 1;
+                var found = false;
+                var startDir = (dir + 5) % 8;
+                for (var d = 0; d < 8; d++) {
+                    var cd = (startDir + d) % 8;
+                    var nx = cx + dirs[cd][0], ny = cy + dirs[cd][1];
+                    if (nx >= 0 && nx < w && ny >= 0 && ny < h && mask[ny*w+nx]) {
+                        if (nx === 0 || nx === w-1 || ny === 0 || ny === h-1 ||
+                            !mask[ny*w+(nx-1)] || !mask[ny*w+(nx+1)] || !mask[(ny-1)*w+nx] || !mask[(ny+1)*w+nx]) {
+                            cx = nx; cy = ny; dir = cd; found = true; break;
+                        }
                     }
                 }
-                if (hitIndex >= 0) break;
-            }
+                steps++;
+                if (!found || steps > maxSteps) break;
+            } while (cx !== x || cy !== y);
+            
+            if (contour.length >= 3) contours.push(contour);
         }
-        
-        // Restore original values
-        allPaths.forEach(function(el, idx) {
-            if (origValues[idx].pe !== null) {
-                el.setAttribute('pointer-events', origValues[idx].pe);
-            } else {
-                el.removeAttribute('pointer-events');
-            }
-            if (origValues[idx].sw !== null) {
-                el.setAttribute('stroke-width', origValues[idx].sw);
-            }
-        });
     }
-    
-    if (hitIndex >= 0 && hitIndex < frame.paths.length) {
-        // Recolour the clicked path
-        saveStateForUndo();
-        const pathData = frame.paths[hitIndex];
-        
-        if (pathData.fill && pathData.fill !== 'none') {
-            pathData.fill = state.strokeColor;
-        }
-        if (pathData.stroke && pathData.stroke !== 'none') {
-            pathData.stroke = state.strokeColor;
-        }
-        
-        state.redoStack = [];
-        renderFrame();
-        updateFrameList();
-        saveToLocalStorage();
-    } else {
-        // Clicked on empty space — add a filled rectangle behind everything
-        saveStateForUndo();
-        
-        const w = state.canvasWidth;
-        const h = state.canvasHeight;
-        const rectPath = 'M 0 0 L ' + w + ' 0 L ' + w + ' ' + h + ' L 0 ' + h + ' Z';
-        
-        frame.paths.unshift({
-            d: rectPath,
-            stroke: 'none',
-            strokeWidth: 0,
-            fill: state.strokeColor,
-            tool: 'fill'
-        });
-        
-        state.redoStack = [];
-        renderFrame();
-        updateFrameList();
-        saveToLocalStorage();
+    return contours;
+}
+
+function simplifyContour(points, tolerance) {
+    if (points.length <= 2) return points;
+    var maxDist = 0, maxIdx = 0;
+    var first = points[0], last = points[points.length-1];
+    for (var i = 1; i < points.length-1; i++) {
+        var dist = pointToLineDist(points[i], first, last);
+        if (dist > maxDist) { maxDist = dist; maxIdx = i; }
     }
+    if (maxDist > tolerance) {
+        var left = simplifyContour(points.slice(0, maxIdx+1), tolerance);
+        var right = simplifyContour(points.slice(maxIdx), tolerance);
+        return left.slice(0,-1).concat(right);
+    }
+    return [first, last];
+}
+
+function pointToLineDist(point, lineStart, lineEnd) {
+    var dx = lineEnd[0]-lineStart[0], dy = lineEnd[1]-lineStart[1];
+    var len = Math.sqrt(dx*dx+dy*dy);
+    if (len === 0) return Math.sqrt(Math.pow(point[0]-lineStart[0],2)+Math.pow(point[1]-lineStart[1],2));
+    var t = Math.max(0, Math.min(1, ((point[0]-lineStart[0])*dx+(point[1]-lineStart[1])*dy)/(len*len)));
+    var px = lineStart[0]+t*dx, py = lineStart[1]+t*dy;
+    return Math.sqrt(Math.pow(point[0]-px,2)+Math.pow(point[1]-py,2));
 }
 
 function applyColorToSelection(color) {
@@ -5516,6 +5785,21 @@ function toggleShortcutsPanel() {
 
 function closeShortcutsPanel() {
     document.getElementById('shortcutsPanel').style.display = 'none';
+}
+
+function toggleDarkMode() {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if (isDark) {
+        document.documentElement.removeAttribute('data-theme');
+        document.getElementById('darkModeIconLight').style.display = 'none';
+        document.getElementById('darkModeIconDark').style.display = '';
+        localStorage.setItem('animframe-dark-mode', 'false');
+    } else {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        document.getElementById('darkModeIconLight').style.display = '';
+        document.getElementById('darkModeIconDark').style.display = 'none';
+        localStorage.setItem('animframe-dark-mode', 'true');
+    }
 }
 
 // ==================== START APPLICATION ====================
