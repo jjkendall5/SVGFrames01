@@ -598,20 +598,23 @@ body {
 
 .slider-section {
     width: 100%;
-    padding: 0 6px;
-    gap: 10px !important;
+    padding: 0 4px;
+    gap: 8px !important;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 .v-slider-item {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
     width: 100%;
+    box-sizing: border-box;
 }
 
 .slider-label {
-    font-size: 8px;
+    font-size: 7px;
     font-weight: 600;
     color: var(--text-tertiary);
     text-transform: uppercase;
@@ -622,28 +625,29 @@ body {
 .h-slider {
     -webkit-appearance: none;
     appearance: none;
-    width: 100%;
+    width: calc(100% - 4px);
     height: 4px;
     background: var(--border);
     border-radius: 2px;
     outline: none;
     cursor: pointer;
     margin: 2px 0;
+    display: block;
 }
 
 .h-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background: var(--accent);
     cursor: pointer;
 }
 
 .h-slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background: var(--accent);
     cursor: pointer;
@@ -651,7 +655,7 @@ body {
 }
 
 .slider-val {
-    font-size: 9px;
+    font-size: 8px;
     font-weight: 700;
     color: var(--accent);
     font-variant-numeric: tabular-nums;

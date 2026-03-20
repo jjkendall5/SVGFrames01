@@ -90,8 +90,9 @@
         <aside class="tool-column">
             <div class="tool-section">
                 <button id="penTool" class="tool-btn active" title="Pen (B)">
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M3 17l4-4m0 0l10-10 4 4-10 10m-4-4l-4 4"/>
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M12.5 3.5l4 4L7 17H3v-4L12.5 3.5z"/>
+                        <path d="M10.5 5.5l4 4" stroke-width="1"/>
                     </svg>
                     <span class="tool-label">Pen</span>
                 </button>
@@ -106,9 +107,10 @@
                     </select>
                 </div>
                 <button id="eraserTool" class="tool-btn" title="Eraser (E)">
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="4" y="8" width="12" height="8" rx="1"/>
-                        <path d="M7 8l6-6"/>
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M16 8l-5 5-4.5 4H3l-0.5-0.5L7 12l5-5z"/>
+                        <path d="M7 12l4.5 4.5" stroke-width="1"/>
+                        <rect x="2" y="16.5" width="10" height="1" rx="0.5" fill="currentColor" stroke="none" opacity="0.3"/>
                     </svg>
                     <span class="tool-label">Eraser</span>
                 </button>
@@ -127,10 +129,10 @@
                     <span class="tool-label">Zoom</span>
                 </button>
                 <button id="fillTool" class="tool-btn" title="Fill (G)">
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75">
-                        <path d="M6 14l-3 3h14" stroke-linejoin="round"/>
-                        <path d="M5 13L13 5l2 2-8 8z" fill="currentColor" opacity="0.2" stroke="currentColor"/>
-                        <path d="M16 12c0 0 2 2.5 2 3.5a2 2 0 0 1-4 0c0-1 2-3.5 2-3.5z" fill="currentColor" opacity="0.4" stroke="none"/>
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M14 3l-8 8-2 5 5-2 8-8z"/>
+                        <path d="M3 17h5" stroke-linecap="round"/>
+                        <path d="M15 10c0 0 3 3 3 5a2.5 2.5 0 0 1-5 0c0-2 2-5 2-5z" fill="currentColor" opacity="0.3"/>
                     </svg>
                     <span class="tool-label">Fill</span>
                 </button>
