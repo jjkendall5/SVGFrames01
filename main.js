@@ -986,6 +986,11 @@ function toggleLayerVisibility(layerId) {
     const layer = state.layers.find(l => l.id === layerId);
     if (layer) {
         layer.visible = !layer.visible;
+        updateMaxFrames();
+        if (state.currentFrameIndex >= state.maxFrames) {
+            state.currentFrameIndex = Math.max(0, state.maxFrames - 1);
+        }
+        updateFrameCounter();
         renderFrame();
         saveToLocalStorage();
     }
@@ -1262,7 +1267,12 @@ function startLayerRename(layerId, nameSpan) {
 }
 
 function updateMaxFrames() {
-    state.maxFrames = Math.max(...state.layers.map(l => l.frames.length), 1);
+    var visibleLayers = state.layers.filter(function(l) { return l.visible; });
+    if (visibleLayers.length === 0) {
+        state.maxFrames = Math.max(...state.layers.map(l => l.frames.length), 1);
+    } else {
+        state.maxFrames = Math.max(...visibleLayers.map(l => l.frames.length), 1);
+    }
 }
 
 // Apply shift-key constraints for straight lines and circles
@@ -1379,6 +1389,7 @@ function startDrawing(e) {
     saveStateForUndo();
     
     const point = getSvgPoint(e);
+    point.pressure = e.pressure || 0.5;
     state.currentPoints.push(point);
     state.startPoint = point; // Store starting point for shift-constrained drawing
     state.lastPointerEvent = e; // Store event for shift key updates
@@ -1457,6 +1468,7 @@ function draw(e) {
     state.lastPointerEvent = e;
     
     let point = getSvgPoint(e);
+    point.pressure = e.pressure || 0.5;
     
     // Apply shift constraints for straight lines and circles
     // Works with either keyboard Shift OR constraint mode toggle button
@@ -1507,6 +1519,16 @@ function draw(e) {
                 state.strokeSize,
                 state.taper / 100
             );
+            state.currentPath.setAttribute('d', pathData);
+        } else if (hasPressureVariation(state.currentPoints)) {
+            // PRESSURE MODE: Use filled outline with pressure-based width
+            if (state.currentPath.getAttribute('stroke') !== 'none') {
+                // Switch from stroked to filled path on first pressure detection
+                state.currentPath.setAttribute('fill', state.strokeColor);
+                state.currentPath.setAttribute('stroke', 'none');
+                state.currentPath.removeAttribute('stroke-width');
+            }
+            const pathData = createPressurePath(smoothedPoints, state.strokeSize);
             state.currentPath.setAttribute('d', pathData);
         } else {
             // UNIFORM MODE: Generate standard stroke path
@@ -1567,7 +1589,8 @@ function applyPointAveraging(points, smoothing) {
         
         smoothed.push({
             x: sumX / totalWeight,
-            y: sumY / totalWeight
+            y: sumY / totalWeight,
+            pressure: points[i].pressure !== undefined ? points[i].pressure : 0.5
         });
     }
     
@@ -1588,6 +1611,73 @@ function applyPointAveraging(points, smoothing) {
  * @param {number} taperAmount - Taper intensity (0.0 to 1.0)
  * @returns {number} - Calculated width at this position
  */
+function hasPressureVariation(points) {
+    // Check if there's meaningful pressure variation (not all 0.5 from mouse)
+    if (points.length < 4) return false;
+    var firstP = points[0].pressure;
+    if (firstP === undefined) return false;
+    for (var i = 1; i < points.length; i++) {
+        if (points[i].pressure !== undefined && Math.abs(points[i].pressure - firstP) > 0.05) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function createPressurePath(points, baseWidth) {
+    // Creates a filled outline path where width varies by pressure at each point
+    if (points.length < 2) {
+        return 'M ' + points[0].x + ' ' + points[0].y;
+    }
+    
+    var leftSide = [];
+    var rightSide = [];
+    
+    for (var i = 0; i < points.length; i++) {
+        // Pressure: 0 = very light, 1 = full press
+        var pressure = points[i].pressure !== undefined ? points[i].pressure : 0.5;
+        
+        // Map pressure to width: light touch = thin, full press = thick
+        // Minimum 15% of base width, maximum 120%
+        var width = baseWidth * (0.15 + pressure * 1.05);
+        var halfWidth = width / 2;
+        
+        // Get tangent direction
+        var tangent;
+        if (i === 0) {
+            tangent = getTangent(points[0], points[1]);
+        } else if (i === points.length - 1) {
+            tangent = getTangent(points[i - 1], points[i]);
+        } else {
+            tangent = getTangent(points[i - 1], points[i + 1]);
+        }
+        
+        var perpX = -tangent.y;
+        var perpY = tangent.x;
+        
+        leftSide.push({
+            x: points[i].x + perpX * halfWidth,
+            y: points[i].y + perpY * halfWidth
+        });
+        
+        rightSide.push({
+            x: points[i].x - perpX * halfWidth,
+            y: points[i].y - perpY * halfWidth
+        });
+    }
+    
+    // Build closed path: left side forward, right side reversed
+    var d = 'M ' + leftSide[0].x + ' ' + leftSide[0].y;
+    for (var i = 1; i < leftSide.length; i++) {
+        d += ' L ' + leftSide[i].x + ' ' + leftSide[i].y;
+    }
+    for (var i = rightSide.length - 1; i >= 0; i--) {
+        d += ' L ' + rightSide[i].x + ' ' + rightSide[i].y;
+    }
+    d += ' Z';
+    return d;
+}
+
 function calculateTaperedWidth(progress, baseWidth, taperAmount) {
     if (taperAmount === 0) {
         return baseWidth; // No taper, uniform stroke
