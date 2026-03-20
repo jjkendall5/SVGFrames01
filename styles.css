@@ -55,7 +55,7 @@
 }
 
 :root {
-    --tool-column-width: 64px;
+    --tool-column-width: 72px;
     --timeline-height: 180px;
     --timeline-min-height: 140px;
 }
@@ -596,35 +596,42 @@ body {
     margin: 0; /* Removed margins */
 }
 
-.size-control {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    margin-top: 4px;
+.slider-section {
     width: 100%;
-    padding: 0 4px;
-    box-sizing: border-box;
+    padding: 0 6px;
+    gap: 10px !important;
 }
 
-.size-slider {
-    -webkit-appearance: slider-vertical;
-    appearance: slider-vertical;
-    width: 4px;
-    height: 60px;
+.v-slider-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+}
+
+.slider-label {
+    font-size: 8px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    line-height: 1;
+}
+
+.h-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
     background: var(--border);
     border-radius: 2px;
     outline: none;
     cursor: pointer;
-    writing-mode: bt-lr;
+    margin: 2px 0;
 }
 
-.size-slider[orient="vertical"] {
-    -webkit-appearance: slider-vertical;
-    writing-mode: bt-lr;
-}
-
-.size-slider::-webkit-slider-thumb {
+.h-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
     width: 14px;
@@ -632,40 +639,28 @@ body {
     border-radius: 50%;
     background: var(--accent);
     cursor: pointer;
-    transition: all 0.15s ease;
 }
 
-.size-slider::-moz-range-thumb {
+.h-slider::-moz-range-thumb {
     width: 14px;
     height: 14px;
     border-radius: 50%;
     background: var(--accent);
     cursor: pointer;
     border: none;
-    transition: all 0.15s ease;
 }
 
-.size-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.2);
-}
-
-.size-slider::-moz-range-thumb:hover {
-    transform: scale(1.2);
-}
-
-.size-value {
-    font-size: 11px;
+.slider-val {
+    font-size: 9px;
     font-weight: 700;
     color: var(--accent);
-    text-align: center;
-    width: 24px;
-    flex-shrink: 0;
     font-variant-numeric: tabular-nums;
+    line-height: 1;
 }
 
 .color-picker {
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
     border: 1px solid var(--border);
     background: transparent;
     cursor: pointer;
@@ -699,155 +694,7 @@ body {
     margin: 0;
 }
 
-.smoothing-control {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    margin-top: 4px;
-    width: 100%;
-    padding: 0 4px;
-    box-sizing: border-box;
-}
 
-.smoothing-slider {
-    -webkit-appearance: slider-vertical;
-    appearance: slider-vertical;
-    width: 4px;
-    height: 60px;
-    background: var(--border);
-    border-radius: 2px;
-    outline: none;
-    cursor: pointer;
-    writing-mode: bt-lr; /* For vertical orientation */
-}
-
-/* Firefox vertical slider */
-.smoothing-slider[orient="vertical"] {
-    -webkit-appearance: slider-vertical;
-    writing-mode: bt-lr;
-}
-
-.smoothing-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--accent);
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.smoothing-slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--accent);
-    cursor: pointer;
-    border: none;
-    transition: all 0.15s ease;
-}
-
-.smoothing-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.2);
-}
-
-.smoothing-slider::-moz-range-thumb:hover {
-    transform: scale(1.2);
-}
-
-.smoothing-indicator {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    align-items: center;
-    width: 24px;
-    flex-shrink: 0;
-}
-
-.smoothing-indicator .level-label {
-    font-size: 8px;
-    font-weight: 600;
-    color: var(--text-tertiary);
-    transition: all 0.2s ease;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    opacity: 0.6;
-}
-
-.smoothing-indicator .level-label.active {
-    color: var(--accent);
-    opacity: 1;
-    font-weight: 700;
-}
-
-.taper-control {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    margin-top: 4px;
-    width: 100%;
-    padding: 0 4px;
-    box-sizing: border-box;
-}
-
-.taper-slider {
-    -webkit-appearance: slider-vertical;
-    appearance: slider-vertical;
-    width: 4px;
-    height: 60px;
-    background: var(--border);
-    border-radius: 2px;
-    outline: none;
-    cursor: pointer;
-    writing-mode: bt-lr;
-}
-
-.taper-slider[orient="vertical"] {
-    -webkit-appearance: slider-vertical;
-    writing-mode: bt-lr;
-}
-
-.taper-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--accent);
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.taper-slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--accent);
-    cursor: pointer;
-    border: none;
-    transition: all 0.15s ease;
-}
-
-.taper-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.2);
-}
-
-.taper-slider::-moz-range-thumb:hover {
-    transform: scale(1.2);
-}
-
-.taper-value {
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--accent);
-    text-align: center;
-    width: 24px;
-    flex-shrink: 0;
-    font-variant-numeric: tabular-nums;
-}
 
 /* ==================== CANVAS ZONE ==================== */
 .canvas-zone {
@@ -2138,7 +1985,7 @@ input:focus:not(:focus-visible) {
 /* Very small screens / mobile */
 @media (max-width: 480px) {
     :root {
-        --tool-column-width: 56px; /* Narrower tool column */
+        --tool-column-width: 64px;
         --timeline-height: 140px;
     }
     
@@ -2263,7 +2110,7 @@ input:focus:not(:focus-visible) {
 /* Tiny screens - very small phones */
 @media (max-width: 360px) {
     :root {
-        --tool-column-width: 48px;
+        --tool-column-width: 56px;
     }
     
     .tool-btn {

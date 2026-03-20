@@ -149,38 +149,24 @@
 
             <div class="tool-divider"></div>
 
-            <div class="tool-section">
-                <span class="section-label">Size</span>
-                <div class="size-control">
-                    <input type="range" id="sizeSlider" min="1" max="20" step="1" value="2" class="size-slider" orient="vertical" title="Brush Size">
-                    <span id="sizeValue" class="size-value">2</span>
+            <div class="tool-section slider-section">
+                <div class="v-slider-item">
+                    <span class="slider-label">Size</span>
+                    <input type="range" id="sizeSlider" min="1" max="20" step="1" value="2" class="h-slider" title="Brush Size">
+                    <span id="sizeValue" class="slider-val">2</span>
+                </div>
+                <div class="v-slider-item">
+                    <span class="slider-label">Taper</span>
+                    <input type="range" id="taperSlider" min="0" max="100" step="5" value="0" class="h-slider" title="Stroke Taper">
+                    <span id="taperValue" class="slider-val">0%</span>
+                </div>
+                <div class="v-slider-item">
+                    <span class="slider-label">Smooth</span>
+                    <input type="range" id="smoothingSlider" min="0.5" max="8" step="0.5" value="3" class="h-slider" title="Stroke Smoothing">
+                    <span id="smoothingValue" class="slider-val">Med</span>
                 </div>
             </div>
 
-            <div class="tool-divider"></div>
-
-            <div class="tool-section">
-                <span class="section-label">Taper</span>
-                <div class="taper-control">
-                    <input type="range" id="taperSlider" min="0" max="100" step="5" value="0" class="taper-slider" orient="vertical" title="Stroke Taper">
-                    <span id="taperValue" class="taper-value">0%</span>
-                </div>
-            </div>
-            
-            <div class="tool-divider"></div>
-
-            <div class="tool-section">
-                <span class="section-label">Smooth</span>
-                <div class="smoothing-control">
-                    <input type="range" id="smoothingSlider" min="0.5" max="8" step="0.5" value="3" class="smoothing-slider" orient="vertical" title="Stroke Smoothing">
-                    <div id="smoothingIndicator" class="smoothing-indicator">
-                        <span class="level-label">High</span>
-                        <span class="level-label active">Med</span>
-                        <span class="level-label">Low</span>
-                    </div>
-                </div>
-            </div>
-            
             <div class="tool-divider"></div>
 
             <div class="tool-section">

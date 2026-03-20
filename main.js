@@ -2375,25 +2375,16 @@ function pointsToPath(points) {
 
 // Update smoothing indicator labels based on current value
 function updateSmoothingLabel() {
-    const indicator = document.getElementById('smoothingIndicator');
-    if (!indicator) return;
+    const el = document.getElementById('smoothingValue');
+    if (!el) return;
     
-    const labels = indicator.querySelectorAll('.level-label');
     const value = state.smoothing;
-    
-    // Remove all active states
-    labels.forEach(label => label.classList.remove('active'));
-    
-    // Set active label based on value
     if (value <= 1.5) {
-        // Low smoothing - bottom label
-        labels[2].classList.add('active');
+        el.textContent = 'Low';
     } else if (value <= 5) {
-        // Medium smoothing - middle label
-        labels[1].classList.add('active');
+        el.textContent = 'Med';
     } else {
-        // High smoothing - top label
-        labels[0].classList.add('active');
+        el.textContent = 'High';
     }
 }
 
@@ -3089,9 +3080,8 @@ function updateFrameList() {
         
         // Create thumbnail SVG
         const thumbSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        thumbSvg.setAttribute('width', '80');
-        thumbSvg.setAttribute('height', '60');
         thumbSvg.setAttribute('viewBox', '0 0 ' + state.canvasWidth + ' ' + state.canvasHeight);
+        thumbSvg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
         thumbSvg.style.background = 'white';
         
         // Get the frame to display (handle held frames)
